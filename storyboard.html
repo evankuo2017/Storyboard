@@ -1,0 +1,2533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visual Storyboard</title>
+    <style>
+        :root {
+            --primary-color: #4361ee;
+            --secondary-color: #f72585;
+            --accent-color: #7209b7;
+            --bg-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --border-color: #e9ecef;
+            --text-color: #212529;
+            --text-light: #6c757d;
+            --success: #2a9d8f;
+            --danger: #e63946;
+            --warning: #fca311;
+            --shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            --radius: 12px;
+            --transition: all 0.3s ease;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 30px auto;
+            background-color: var(--card-bg);
+            padding: 30px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+        
+        h1, h2 {
+            color: var(--primary-color);
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+        
+        h1 {
+            font-size: 2.2rem;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+        
+        h2 {
+            font-size: 1.5rem;
+            margin-top: 30px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--border-color);
+        }
+        
+        p {
+            margin-bottom: 20px;
+            color: var(--text-light);
+            text-align: center;
+        }
+        
+        .timeline-container {
+            width: 100%;
+            height: 400px;
+            background: #f8f9fa;
+            border-radius: var(--radius);
+            position: relative;
+            margin: 25px 0;
+            overflow-x: auto;
+            overflow-y: hidden;
+            border: 1px solid var(--border-color);
+            box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.05);
+        }
+        
+        .timeline-content {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            min-width: 800px;
+            padding: 10px 100px;
+            box-sizing: border-box;
+        }
+        
+        .timeline-line {
+            position: absolute;
+            bottom: 60px;
+            left: 100px;
+            right: 100px;
+            height: 3px;
+            background: var(--primary-color);
+        }
+        
+        .time-marker {
+            position: absolute;
+            bottom: 70px;
+            transform: translateX(-50%);
+            font-size: 12px;
+            color: var(--text-light);
+            font-weight: 500;
+        }
+        
+        .node-marker {
+            position: absolute;
+            bottom: 45px;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: var(--secondary-color);
+            transform: translateX(-50%);
+            color: white;
+            font-size: 14px;
+            text-align: center;
+            line-height: 30px;
+            cursor: move;
+            user-select: none;
+            z-index: 10;
+            transition: var(--transition);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+        
+        .node-marker.selected {
+            border: 3px solid var(--warning);
+            box-shadow: 0 0 0 4px rgba(252, 163, 17, 0.3);
+            transform: translateX(-50%) scale(1.1);
+        }
+        
+        .node-marker:hover {
+            transform: translateX(-50%) scale(1.15);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        
+        .node-marker[data-index="0"] {
+            cursor: not-allowed;
+            background: var(--accent-color);
+        }
+        
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            margin: 20px 0;
+            gap: 15px;
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: var(--radius);
+            background-color: var(--primary-color);
+            color: white;
+            cursor: pointer;
+            transition: var(--transition);
+            font-weight: 500;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        
+        button:hover {
+            background-color: #3a56d4;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button:disabled {
+            background-color: #b8c2cc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        button.delete {
+            background-color: var(--danger);
+        }
+        
+        button.delete:hover {
+            background-color: #d62a37;
+        }
+        
+        .button-primary {
+            background-color: var(--primary-color);
+        }
+        
+        .button-primary:hover {
+            background-color: #3a56d4;
+        }
+        
+        .status-message {
+            margin: 15px 0;
+            padding: 10px;
+            border-radius: var(--radius);
+            background-color: #e2e3e5;
+            color: var(--text-color);
+            font-size: 14px;
+            text-align: center;
+        }
+        
+        .node-controls {
+            display: flex;
+            flex-wrap: wrap;
+            margin-top: 25px;
+            gap: 25px;
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+        
+        .node-info {
+            flex: 2;
+            min-width: 300px;
+        }
+        
+        .node-media {
+            flex: 1;
+            min-width: 250px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--text-color);
+        }
+        
+        input, textarea {
+            width: 100%;
+            padding: 10px 15px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            font-family: inherit;
+            font-size: 14px;
+            transition: var(--transition);
+            background-color: white;
+        }
+        
+        input:focus, textarea:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.15);
+        }
+        
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+        
+        .table-container {
+            margin-top: 30px;
+            overflow-x: auto;
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+        
+        th, td {
+            padding: 12px 15px;
+            border: 1px solid var(--border-color);
+            text-align: left;
+        }
+        
+        th {
+            background-color: var(--primary-color);
+            color: white;
+            font-weight: 500;
+        }
+        
+        tr {
+            transition: var(--transition);
+        }
+        
+        tr:nth-child(even) {
+            background-color: rgba(0, 0, 0, 0.02);
+        }
+        
+        tr:hover {
+            background-color: rgba(67, 97, 238, 0.05);
+        }
+        
+        tr.selected {
+            background-color: rgba(252, 163, 17, 0.15);
+            border-left: 4px solid var(--warning);
+        }
+        
+        .image-preview {
+            width: 100%;
+            height: 200px;
+            border: 2px dashed var(--border-color);
+            border-radius: var(--radius);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 15px;
+            position: relative;
+            overflow: hidden;
+            transition: var(--transition);
+            background-color: white;
+        }
+        
+        .image-preview:hover {
+            border-color: var(--primary-color);
+            background-color: rgba(67, 97, 238, 0.03);
+        }
+        
+        .image-preview img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+        
+        .drop-message {
+            color: var(--text-light);
+            text-align: center;
+            font-size: 14px;
+            padding: 15px;
+        }
+        
+        .time-tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 100;
+            font-weight: 500;
+        }
+        
+        #process-btn {
+            background-color: var(--success);
+        }
+        
+        #process-btn:hover {
+            background-color: #238579;
+        }
+        
+        #output-text {
+            background-color: #f8f9fa;
+            border: 1px solid var(--border-color);
+            padding: 15px;
+            font-size: 14px;
+            color: var(--text-color);
+            font-family: monospace;
+        }
+        
+        .node-image-container {
+            position: absolute;
+            bottom: 90px;
+            transform: translateX(-50%);
+            width: 180px;
+            height: 180px;
+            border: 2px dashed var(--border-color);
+            border-radius: var(--radius);
+            overflow: hidden;
+            background: white;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        
+        .node-image-container:hover {
+            border-color: var(--primary-color);
+            background-color: rgba(67, 97, 238, 0.03);
+        }
+        
+        .node-image-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #f8f9fa;
+        }
+        
+        .node-image-container .drop-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: var(--text-light);
+            text-align: center;
+            font-size: 12px;
+            padding: 10px;
+            width: 100%;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+                margin: 10px;
+            }
+            
+            .node-controls {
+                flex-direction: column;
+            }
+            
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            button {
+                width: 100%;
+            }
+            
+            .button-group {
+                width: 100%;
+                justify-content: space-between;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>FramePack Storyboard</h1>
+        <p>Create up to 10 nodes on a 120-second timeline. Add images to each node and describe transitions between nodes.</p>
+        
+        <div class="timeline-container">
+            <div class="timeline-content" id="timeline">
+                <div class="timeline-line"></div>
+                <!-- Time markers will be added by JavaScript -->
+                <!-- Node markers will be added by JavaScript -->
+            </div>
+        </div>
+        
+        <div class="controls">
+            <div class="form-group" style="width: 200px;">
+                <label for="add-node-time">New Node Time (seconds):</label>
+                <input type="number" id="add-node-time" min="0" max="120" step="0.1" value="10">
+            </div>
+            <button id="add-node-btn" class="button-primary">Add Node</button>
+        </div>
+        
+        <div class="status-message" id="status-message">Ready. Add nodes to the storyboard.</div>
+        
+        <div class="node-controls">
+            <div class="node-info">
+                <h2>Node Controls</h2>
+                
+                <div class="button-group">
+                    <button id="prev-node-btn">← Previous Node</button>
+                    <div style="padding: 8px;">Node: <span id="current-node">0</span></div>
+                    <button id="next-node-btn">Next Node →</button>
+                </div>
+                
+                <div class="form-group">
+                    <label for="node-time">Node Time (seconds):</label>
+                    <input type="number" id="node-time" min="0" max="120" step="0.1" value="0">
+                    <button id="update-time-btn">Update Time</button>
+                    <button id="delete-node-btn" class="delete">Delete Node</button>
+                </div>
+                
+                <div class="form-group">
+                    <label for="transition-text">Transition Description to Next Node:</label>
+                    <textarea id="transition-text" placeholder="Describe what happens between this node and the next..."></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="node-seed">Seed (for video generation):</label>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <input type="number" id="node-seed" min="0" max="2147483647" step="1" placeholder="Leave empty for random" style="flex: 1; min-width: 0;">
+                        <button id="random-seed-btn" type="button" style="flex-shrink: 0; padding: 10px 15px; white-space: nowrap;">Random</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 上傳按鈕，隱藏但存在 -->
+        <input type="file" id="image-upload" accept="image/*" style="display: none;">
+        
+        <div class="table-container">
+            <h2>Node Summary</h2>
+            <table id="node-table">
+                <thead>
+                    <tr>
+                        <th>Node</th>
+                        <th>Time (seconds)</th>
+                        <th>Has Image</th>
+                        <th>Transition to Next Node</th>
+                        <th>Seed</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Table rows will be added by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+        
+        <div style="margin-top: 30px; display: flex; gap: 10px; justify-content: center;">
+            <button id="load-storyboard-btn" class="button-primary" style="padding: 15px 30px; font-size: 16px; min-width: 200px;">Load Storyboard</button>
+            <button id="process-btn" class="button-primary" style="padding: 15px 30px; font-size: 16px; min-width: 200px;">Process Storyboard</button>
+        </div>
+
+        <!-- 修改處理狀態區域，刪除刷新按鈕 -->
+        <div id="processing-status-container" style="margin-top: 30px; display: none;">
+            <h2>Video Processing Status</h2>
+            <div id="project-info" style="margin-bottom: 15px; padding: 10px; background-color: #f5f5f5; border-radius: 5px; font-family: monospace; font-size: 14px; display: none;">
+                <strong>專案資料夾:</strong> <span id="project-folder-path"></span>
+            </div>
+            <div id="task-list" class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Task ID</th>
+                            <th>Status</th>
+                            <th>Progress</th>
+                            <th>Message</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="task-status-body">
+                        <!-- 任務狀態將動態添加在這裡 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Constants
+            const MAX_NODES = 10;         // Maximum number of nodes allowed in the storyboard
+            const TIMELINE_LENGTH = 120;  // Timeline length in seconds
+            const DEFAULT_NODE_TIME = 10; // Default time for new nodes
+            const ZOOM_FACTOR = 1.2;      // Zoom multiplier for each zoom step
+            const MIN_ZOOM = 0.5;         // Minimum zoom level
+            const MAX_ZOOM = 15;           // Maximum zoom level
+            
+            // Application state management
+            const state = {
+                nodes: [],                // Array of all nodes in the storyboard
+                currentNodeIndex: 0,      // Index of the currently selected node
+                zoom: 1,                  // Current zoom level of the timeline
+                taskIds: [],              // 存儲已提交的任務ID
+                
+                // Adds a new node at the specified time
+                addNode(time) {
+                    console.log(`State: Adding node at time ${time}`);
+                    if (this.nodes.length >= MAX_NODES) {
+                        return { success: false, message: `Maximum node count reached (${MAX_NODES})` };
+                    }
+                    
+                    // First node must be at time 0
+                    if (this.nodes.length === 0) {
+                        time = 0;
+                    }
+                    
+                    // Ensure time is within valid range
+                    time = Math.max(0, Math.min(time, TIMELINE_LENGTH));
+                    
+                    // Check for existing nodes at this time
+                    for (const node of this.nodes) {
+                        if (Math.abs(node.time - time) < 0.2) { // Within 0.2 seconds
+                            return { success: false, message: `There is already a node at time ${time}s` };
+                        }
+                    }
+                    
+                    // Create new node with default properties
+                    const nodeIndex = this.nodes.length;
+                    const newNode = {
+                        index: nodeIndex,
+                        time: time,
+                        hasImage: false,
+                        image: null,
+                        imageUrl: null,
+                        transitionText: "",
+                        seed: null // null means random seed
+                    };
+                    
+                    // Add node and sort all nodes by time
+                    this.nodes.push(newNode);
+                    this.nodes.sort((a, b) => a.time - b.time);
+                    
+                    // Update indices after sorting
+                    this.nodes.forEach((node, i) => {
+                        node.index = i;
+                    });
+                    
+                    // Set current node to the newly added node
+                    for (let i = 0; i < this.nodes.length; i++) {
+                        if (Math.abs(this.nodes[i].time - time) < 0.1) {
+                            this.currentNodeIndex = i;
+                            break;
+                        }
+                    }
+                    
+                    return { success: true, message: `Node added successfully at ${time}s` };
+                },
+                
+                // Updates a node's position on the timeline
+                updateNodeTime(nodeIndex, newTime) {
+                    console.log(`State: Updating time for node ${nodeIndex} to ${newTime}`);
+                    if (nodeIndex < 0 || nodeIndex >= this.nodes.length) {
+                        return { success: false, message: "Invalid node index" };
+                    }
+                    
+                    // First node must remain at time 0
+                    if (nodeIndex === 0) {
+                        return { success: false, message: "Cannot move the first node (fixed at time 0)" };
+                    }
+                    
+                    // Calculate valid time range to prevent overlapping nodes
+                    let minTime = 0;
+                    let maxTime = TIMELINE_LENGTH;
+                    
+                    // Find boundaries based on adjacent nodes
+                    for (const node of this.nodes) {
+                        if (node.index < nodeIndex && node.time > minTime) {
+                            minTime = node.time + 0.2; // Add 0.2 second margin
+                        }
+                        if (node.index > nodeIndex && node.time < maxTime) {
+                            maxTime = node.time - 0.2; // Add 0.2 second margin
+                        }
+                    }
+                    
+                    // Ensure time is within valid range
+                    newTime = Math.max(minTime, Math.min(newTime, maxTime));
+                    
+                    // Update the node time
+                    this.nodes[nodeIndex].time = newTime;
+                    
+                    // Re-sort nodes by time
+                    this.nodes.sort((a, b) => a.time - b.time);
+                    
+                    // Update indices after sorting
+                    this.nodes.forEach((node, i) => {
+                        node.index = i;
+                    });
+                    
+                    // Keep the moved node selected
+                    this.currentNodeIndex = nodeIndex;
+                    
+                    return { success: true, message: `Node ${nodeIndex} moved to ${newTime}s` };
+                },
+                
+                // Removes a node from the storyboard
+                deleteNode(nodeIndex) {
+                    console.log(`State: Deleting node ${nodeIndex}`);
+                    if (nodeIndex < 0 || nodeIndex >= this.nodes.length) {
+                        return { success: false, message: "Invalid node index" };
+                    }
+                    
+                    // First node cannot be deleted
+                    if (nodeIndex === 0) {
+                        return { success: false, message: "Cannot delete the first node (must retain)" };
+                    }
+                    
+                    // Remove the node
+                    this.nodes.splice(nodeIndex, 1);
+                    
+                    // Update indices for remaining nodes
+                    this.nodes.forEach((node, i) => {
+                        node.index = i;
+                    });
+                    
+                    // Update selected node if needed
+                    if (this.currentNodeIndex >= this.nodes.length) {
+                        this.currentNodeIndex = this.nodes.length - 1;
+                    }
+                    
+                    return { success: true, message: `Node ${nodeIndex} deleted` };
+                },
+                
+                // Attaches an image to a node
+                updateNodeImage(nodeIndex, imageFile) {
+                    console.log(`State: Updating image for node ${nodeIndex}`);
+                    if (nodeIndex < 0 || nodeIndex >= this.nodes.length) {
+                        console.error('Invalid node index:', nodeIndex);
+                        return false;
+                    }
+                    
+                    if (imageFile) {
+                        console.log('Processing image file...');
+                        const reader = new FileReader();
+                        
+                        reader.onload = (e) => {
+                            console.log('FileReader onload triggered');
+                            this.nodes[nodeIndex].imageUrl = e.target.result;
+                            this.nodes[nodeIndex].hasImage = true;
+                            this.nodes[nodeIndex].image = imageFile;
+                            console.log('Image data loaded, updating UI');
+                            this.updateUI();
+                        };
+                        
+                        reader.onerror = (e) => {
+                            console.error('FileReader error:', e);
+                            statusMessageEl.textContent = 'Image loading failed';
+                        };
+                        
+                        console.log('Starting to read file as data URL');
+                        reader.readAsDataURL(imageFile);
+                        statusMessageEl.textContent = 'Image upload successful';
+                        return true;
+                    }
+                    
+                    console.error('No image file provided');
+                    return false;
+                },
+                
+                // Sets the transition description text for a node
+                updateTransitionText(nodeIndex, text) {
+                    console.log(`State: Updating transition text for node ${nodeIndex}`);
+                    if (nodeIndex < 0 || nodeIndex >= this.nodes.length) {
+                        return false;
+                    }
+                    
+                    this.nodes[nodeIndex].transitionText = text;
+                    return true;
+                },
+                
+                // Sets the seed for a node
+                updateNodeSeed(nodeIndex, seed) {
+                    console.log(`State: Updating seed for node ${nodeIndex} to ${seed}`);
+                    if (nodeIndex < 0 || nodeIndex >= this.nodes.length) {
+                        return false;
+                    }
+                    
+                    this.nodes[nodeIndex].seed = seed;
+                    return true;
+                },
+                
+                // Returns the currently selected node
+                getActiveNode() {
+                    if (this.currentNodeIndex >= 0 && this.currentNodeIndex < this.nodes.length) {
+                        return this.nodes[this.currentNodeIndex];
+                    }
+                    return null;
+                },
+                
+                // Creates and sends storyboard data to the backend
+                processStoryboard() {
+                    console.log('State: Processing storyboard');
+                    console.log('Current nodes for processing:', JSON.parse(JSON.stringify(this.nodes))); // 詳細打印節點狀態
+
+                    if (this.nodes.length === 0) {
+                        console.warn('ProcessStoryboard check failed: No nodes.');
+                        return "No nodes to process. Please add at least one node.";
+                    }
+                    
+                    // 檢查是否有至少兩個節點
+                    if (this.nodes.length < 2) {
+                        const message = "Storyboard needs at least 2 nodes to create transitions. Please add more nodes.";
+                        console.warn('ProcessStoryboard check failed: Less than 2 nodes.', this.nodes.length);
+                        alert(message);
+                        return message;
+                    }
+                    
+                    // 檢查是否所有節點都有圖片
+                    const missingImages = [];
+                    for (let i = 0; i < this.nodes.length; i++) {
+                        if (!this.nodes[i].hasImage) {
+                            missingImages.push(i);
+                            console.warn(`ProcessStoryboard check: Node ${i} is missing image. Node data:`, JSON.parse(JSON.stringify(this.nodes[i])));
+                        }
+                    }
+                    
+                    if (missingImages.length > 0) {
+                        const missingStr = missingImages.join(', ');
+                        const message = `Nodes ${missingStr} are missing images. Please add images to all nodes before saving.`;
+                        alert(message);
+                        return message;
+                    }
+                    
+                    // Create timestamp in format: YYYYMMDD_HHMMSS
+                    const now = new Date();
+                    const year = now.getFullYear();
+                    const month = String(now.getMonth() + 1).padStart(2, '0');
+                    const day = String(now.getDate()).padStart(2, '0');
+                    const hours = String(now.getHours()).padStart(2, '0');
+                    const minutes = String(now.getMinutes()).padStart(2, '0');
+                    const seconds = String(now.getSeconds()).padStart(2, '0');
+                    
+                    const timestamp = `${year}${month}${day}_${hours}${minutes}${seconds}`;
+                    // Generate filename: nodeCount_timestamp.json
+                    const fileName = `${this.nodes.length}_${timestamp}.json`;
+                    
+                    // Prepare data structure for output
+                    const storyboardData = {
+                        job_id: timestamp,
+                        nodes: [],
+                        transitions: [],
+                        file_name: fileName // Add filename for backend use
+                    };
+                    
+                    // Process all nodes
+                    for (let i = 0; i < this.nodes.length; i++) {
+                        const node = this.nodes[i];
+                        const nodeData = {
+                            index: i,
+                            time: node.time,
+                            hasImage: node.hasImage,
+                            seed: node.seed // 包含 seed 資訊
+                        };
+                        
+                        // Add image data if present
+                        if (node.hasImage && node.imageUrl) {
+                            if (node.imageUrl.startsWith('data:')) { // 如果是 base64 資料 URL
+                                const base64Data = node.imageUrl.split(',')[1];
+                                nodeData.imageData = base64Data;
+                                nodeData.imageType = node.imageUrl.split(';')[0].split(':')[1]; // e.g., image/jpeg
+                            } else if (node.imageUrl.includes('/storyboard_outputs/image_output/')) { // 如果是伺服器上的圖片路徑
+                                // 從 imageUrl 中提取檔名作為 imagePath
+                                const parts = node.imageUrl.split('/');
+                                nodeData.imagePath = parts[parts.length - 1]; // 取最後一部分作為檔名
+                            }
+                        }
+                        
+                        storyboardData.nodes.push(nodeData);
+                        
+                        // Add transition to next node if it exists and not the last node
+                        if (i < this.nodes.length - 1) {
+                            const nextNode = this.nodes[i + 1];
+                            const transitionData = {
+                                from_node: i,
+                                to_node: i + 1,
+                                text: node.transitionText,
+                                time_range: [node.time, nextNode.time]
+                            };
+                            
+                            storyboardData.transitions.push(transitionData);
+                        }
+                    }
+                    
+                    // Log the data being sent to the backend for debugging
+                    console.log("Data being sent to /save_storyboard:", JSON.parse(JSON.stringify(storyboardData)));
+
+                    // Show processing message
+                    const currentOutputTextEl = document.getElementById('output-text');
+                    if (currentOutputTextEl) {
+                        currentOutputTextEl.value = "Processing data and sending to backend...";
+                    } else {
+                        console.error("[State.processStoryboard] outputTextEl is null before fetch.");
+                    }
+                    
+                    // Send data to Python backend
+                    fetch('/save_storyboard', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(storyboardData)
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            return response.json().then(data => {
+                                throw new Error(data.message || `HTTP error! Status: ${response.status}`);
+                            });
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('Success:', data);
+                        const saveMessage = `Processing successful! Total ${this.nodes.length} nodes.\n\n` +
+                                    `Project created: ${data.project_folder}\n` +
+                                    `JSON file saved as ${data.filename}\n` +
+                                    `Project path: ${data.project_path}`;
+                        const el = document.getElementById('output-text');
+                        if (el) {
+                            el.value = saveMessage;
+                        } else {
+                            console.error("[State.processStoryboard] outputTextEl is null in fetch.then.");
+                        }
+                        
+                        // 在保存成功後詢問是否立即處理視頻
+                        const confirmProcess = confirm("Project created and storyboard saved successfully! Do you want to start processing the video now?");
+                        
+                        if (confirmProcess) {
+                            // 顯示處理狀態區域
+                            document.getElementById('processing-status-container').style.display = 'block';
+                            
+                            // 開始處理視頻，使用專案資料夾名稱
+                            this.startVideoProcessing(data.project_folder);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        const errorMessage = `Error: ${error.message}\n\n` +
+                                    `Please check if all nodes have images uploaded.`;
+                        const el = document.getElementById('output-text');
+                        if (el) {
+                            el.value = errorMessage;
+                        } else {
+                            console.error("[State.processStoryboard] outputTextEl is null in fetch.catch.");
+                        }
+                        alert(errorMessage);
+                    });
+                    
+                    return "Sending data to backend...";
+                },
+                
+                // 開始處理視頻（使用專案資料夾名稱）
+                startVideoProcessing(projectFolder) {
+                    console.log(`Starting video processing for project: ${projectFolder}`);
+                    const currentOutputTextEl = document.getElementById('output-text');
+                    if (currentOutputTextEl) {
+                        currentOutputTextEl.value += "\n\nStarting video processing...";
+                    } else {
+                        console.error("[State.startVideoProcessing] outputTextEl is null when starting video processing.");
+                    }
+                    
+                    fetch('/process_storyboard', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            project_folder: projectFolder
+                        })
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! Status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('Processing response:', data);
+                        
+                        if (data.status === 'success') {
+                            const el = document.getElementById('output-text');
+                            if (el) {
+                                const projectInfo = data.project_folder ? `\n專案資料夾: ${data.project_folder}` : '';
+                                el.value += `\n\nSubmitted ${data.task_ids.length} video processing tasks.${projectInfo}`;
+                            } else {
+                                console.error("[State.startVideoProcessing] outputTextEl is null when submitting tasks.");
+                            }
+                            this.taskIds = data.task_ids;
+                            this.currentProjectFolder = data.project_folder; // 儲存專案資料夾信息
+                            
+                            // 顯示專案資料夾信息
+                            if (data.project_folder) {
+                                const projectInfoEl = document.getElementById('project-info');
+                                const projectPathEl = document.getElementById('project-folder-path');
+                                if (projectInfoEl && projectPathEl) {
+                                    projectPathEl.textContent = data.project_folder;
+                                    projectInfoEl.style.display = 'block';
+                                }
+                            }
+                            
+                            // 開始定期檢查任務狀態
+                            this.startTaskStatusPolling();
+                        } else {
+                            // 處理錯誤響應
+                            const el = document.getElementById('output-text');
+                            if (el) {
+                                el.value += `\n\nSubmission failed: ${data.message}`;
+                            } else {
+                                console.error("[State.startVideoProcessing] outputTextEl is null on submission failure.");
+                            }
+                            
+                            // 顯示錯誤訊息
+                            alert(`Error: ${data.message}`);
+                            
+                            // 隱藏處理狀態區域（如果沒有成功的任務）
+                            if (this.taskIds.length === 0) {
+                                document.getElementById('processing-status-container').style.display = 'none';
+                            }
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Processing request error:', error);
+                        const el = document.getElementById('output-text');
+                        if (el) {
+                            el.value += `\n\nProcessing request error: ${error.message}`;
+                        } else {
+                            console.error("[State.startVideoProcessing] outputTextEl is null on request error.");
+                        }
+                        alert(`Error: ${error.message}`);
+                        
+                        // 隱藏處理狀態區域
+                        document.getElementById('processing-status-container').style.display = 'none';
+                    });
+                },
+                
+                // 開始輪詢任務狀態
+                startTaskStatusPolling() {
+                    // 清除可能存在的上一次輪詢
+                    if (this.statusPollingInterval) {
+                        clearInterval(this.statusPollingInterval);
+                    }
+                    
+                    // 立即更新一次
+                    this.updateTaskStatus();
+                    
+                    // 設置定期更新
+                    this.statusPollingInterval = setInterval(() => {
+                        this.updateTaskStatus();
+                    }, 5000); // 每5秒更新一次
+                },
+                
+                // 停止輪詢任務狀態
+                stopTaskStatusPolling() {
+                    if (this.statusPollingInterval) {
+                        clearInterval(this.statusPollingInterval);
+                        this.statusPollingInterval = null;
+                    }
+                },
+                
+                // 更新任務狀態
+                updateTaskStatus() {
+                    // 如果沒有任務，則不需要查詢
+                    if (this.taskIds.length === 0) {
+                        return;
+                    }
+                    
+                    console.log('Updating task status...');
+                    
+                    fetch('/task_status')
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! Status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.status === 'success' && data.tasks) {
+                            this.renderTaskStatus(data.tasks);
+                            
+                            // 檢查是否所有任務都已完成
+                            const allCompleted = this.taskIds.every(taskId => {
+                                const task = data.tasks[taskId];
+                                return task && (task.status === 'completed' || task.status === 'error' || task.status === 'cancelled');
+                            });
+                            
+                            if (allCompleted) {
+                                console.log('All tasks completed');
+                                this.stopTaskStatusPolling();
+                            }
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching task status:', error);
+                    });
+                },
+                
+                // 渲染任務狀態
+                renderTaskStatus(tasks) {
+                    const statusTableBody = document.getElementById('task-status-body');
+                    
+                    // 清空表格
+                    statusTableBody.innerHTML = '';
+                    
+                    // 添加每個任務的狀態
+                    this.taskIds.forEach(taskId => {
+                        const task = tasks[taskId];
+                        if (!task) return;
+                        
+                        const row = document.createElement('tr');
+                        
+                        // 任務ID
+                        const idCell = document.createElement('td');
+                        idCell.textContent = taskId;
+                        row.appendChild(idCell);
+                        
+                        // 狀態
+                        const statusCell = document.createElement('td');
+                        statusCell.textContent = this.getStatusText(task.status);
+                        statusCell.style.color = this.getStatusColor(task.status);
+                        row.appendChild(statusCell);
+                        
+                        // 進度
+                        const progressCell = document.createElement('td');
+                        
+                        if (task.status === 'processing') {
+                            const progressBar = document.createElement('div');
+                            progressBar.className = 'progress-bar';
+                            progressBar.style.width = '100%';
+                            progressBar.style.height = '20px';
+                            progressBar.style.backgroundColor = '#f0f0f0';
+                            progressBar.style.borderRadius = '4px';
+                            progressBar.style.overflow = 'hidden';
+                            
+                            const progressIndicator = document.createElement('div');
+                            progressIndicator.style.width = `${task.progress}%`;
+                            progressIndicator.style.height = '100%';
+                            progressIndicator.style.backgroundColor = '#4361ee';
+                            progressIndicator.style.transition = 'width 0.3s ease';
+                            
+                            progressBar.appendChild(progressIndicator);
+                            progressCell.appendChild(progressBar);
+                        } else {
+                            progressCell.textContent = `${task.progress}%`;
+                        }
+                        row.appendChild(progressCell);
+                        
+                        // 訊息
+                        const messageCell = document.createElement('td');
+                        messageCell.textContent = task.message || '';
+                        row.appendChild(messageCell);
+                        
+                        // 操作
+                        const actionCell = document.createElement('td');
+                        
+                        if (task.status === 'completed' && task.output_file) {
+                            const viewButton = document.createElement('button');
+                            viewButton.className = 'button-primary';
+                            viewButton.textContent = 'View';
+                            viewButton.style.marginRight = '5px';
+                            viewButton.onclick = () => {
+                                this.viewVideoResult(task.output_file);
+                            };
+                            actionCell.appendChild(viewButton);
+                            
+                            const regenerateButton = document.createElement('button');
+                            regenerateButton.className = 'button-primary';
+                            regenerateButton.textContent = 'Regenerate';
+                            regenerateButton.style.backgroundColor = '#28a745';
+                            regenerateButton.onclick = () => {
+                                this.regenerateVideo(taskId);
+                            };
+                            actionCell.appendChild(regenerateButton);
+                        }
+                        
+                        row.appendChild(actionCell);
+                        
+                        // 將行添加到表格
+                        statusTableBody.appendChild(row);
+                    });
+                },
+                
+                // 獲取狀態文字
+                getStatusText(status) {
+                    switch (status) {
+                        case 'queued': return 'Queued';
+                        case 'processing': return 'Processing';
+                        case 'completed': return 'Completed';
+                        case 'error': return 'Error';
+                        case 'cancelled': return 'Cancelled';
+                        default: return status;
+                    }
+                },
+                
+                // 獲取狀態顏色
+                getStatusColor(status) {
+                    switch (status) {
+                        case 'queued': return '#6c757d'; // 灰色
+                        case 'processing': return '#4361ee'; // 藍色
+                        case 'completed': return '#2a9d8f'; // 綠色
+                        case 'error': return '#e63946'; // 紅色
+                        case 'cancelled': return '#fca311'; // 黃色
+                        default: return '#212529'; // 黑色
+                    }
+                },
+                
+                // 查看視頻結果
+                viewVideoResult(outputFile) {
+                    // 在查看視頻前先刷新狀態
+                    this.updateTaskStatus();
+                    
+                    // 獲取文件名
+                    const fileName = outputFile.split('/').pop();
+                    
+                    // 創建視頻查看對話框
+                    const dialog = document.createElement('div');
+                    dialog.className = 'video-dialog';
+                    dialog.style.position = 'fixed';
+                    dialog.style.top = '0';
+                    dialog.style.left = '0';
+                    dialog.style.width = '100%';
+                    dialog.style.height = '100%';
+                    dialog.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+                    dialog.style.zIndex = '9999';
+                    dialog.style.display = 'flex';
+                    dialog.style.flexDirection = 'column';
+                    dialog.style.alignItems = 'center';
+                    dialog.style.justifyContent = 'center';
+                    
+                    // 視頻標題
+                    const title = document.createElement('h2');
+                    title.textContent = fileName;
+                    title.style.color = 'white';
+                    title.style.marginBottom = '20px';
+                    
+                    // 視頻元素
+                    const video = document.createElement('video');
+                    video.src = `/video/${fileName}`;
+                    video.controls = true;
+                    video.autoplay = true;
+                    video.style.maxWidth = '80%';
+                    video.style.maxHeight = '70%';
+                    video.style.boxShadow = '0 0 20px rgba(0, 0, 0, 0.5)';
+                    
+                    // 關閉按鈕
+                    const closeButton = document.createElement('button');
+                    closeButton.textContent = 'Close';
+                    closeButton.className = 'button-primary';
+                    closeButton.style.marginTop = '20px';
+                    closeButton.onclick = () => {
+                        document.body.removeChild(dialog);
+                        // 關閉對話框後再次刷新狀態
+                        this.updateTaskStatus();
+                    };
+                    
+                    // 添加元素到對話框
+                    dialog.appendChild(title);
+                    dialog.appendChild(video);
+                    dialog.appendChild(closeButton);
+                    
+                    // 點擊背景也可以關閉
+                    dialog.onclick = (e) => {
+                        if (e.target === dialog) {
+                            document.body.removeChild(dialog);
+                            // 關閉對話框後再次刷新狀態
+                            this.updateTaskStatus();
+                        }
+                    };
+                    
+                    // 添加到頁面
+                    document.body.appendChild(dialog);
+                },
+                
+                // 重生影片（保持 prompt 不變，隨機 seed）
+                regenerateVideo(taskId) {
+                    const confirmRegenerate = confirm("重生影片會保持相同的 prompt，但使用隨機 seed。是否繼續？");
+                    if (!confirmRegenerate) return;
+                    
+                    // 為所有節點生成新的隨機 seed
+                    this.nodes.forEach(node => {
+                        if (node.index > 0) { // 跳過第一個節點（不用於生成）
+                            node.seed = Math.floor(Math.random() * 2147483647);
+                        }
+                    });
+                    
+                    // 更新 UI 顯示新的 seed
+                    this.updateUI();
+                    
+                    // 重新處理 storyboard
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                    const fileName = `${this.nodes.length}_${timestamp}_regenerate.json`;
+                    
+                    // 準備數據結構
+                    const storyboardData = {
+                        job_id: timestamp,
+                        nodes: [],
+                        transitions: [],
+                        file_name: fileName
+                    };
+                    
+                    // 處理所有節點
+                    for (let i = 0; i < this.nodes.length; i++) {
+                        const node = this.nodes[i];
+                        const nodeData = {
+                            index: i,
+                            time: node.time,
+                            hasImage: node.hasImage,
+                            seed: node.seed // 包含新的隨機 seed
+                        };
+                        
+                        // 添加圖片數據
+                        if (node.hasImage && node.imageUrl) {
+                            if (node.imageUrl.startsWith('data:')) {
+                                const base64Data = node.imageUrl.split(',')[1];
+                                nodeData.imageData = base64Data;
+                                nodeData.imageType = node.imageUrl.split(';')[0].split(':')[1];
+                            } else if (node.imageUrl.includes('/storyboard_outputs/image_output/')) {
+                                const segments = node.imageUrl.split('/');
+                                nodeData.imagePath = segments[segments.length - 1];
+                            }
+                        }
+                        
+                        storyboardData.nodes.push(nodeData);
+                        
+                        // 添加轉場到下一個節點
+                        if (i < this.nodes.length - 1) {
+                            const nextNode = this.nodes[i + 1];
+                            const transitionData = {
+                                from_node: i,
+                                to_node: i + 1,
+                                text: node.transitionText,
+                                time_range: [node.time, nextNode.time]
+                            };
+                            storyboardData.transitions.push(transitionData);
+                        }
+                    }
+                    
+                    // 發送到後端並開始處理
+                    fetch('/save_storyboard', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(storyboardData)
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            // 立即開始處理視頻，使用專案資料夾名稱
+                            this.startVideoProcessing(data.project_folder);
+                        } else {
+                            alert(`重生失敗: ${data.message}`);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('重生影片錯誤:', error);
+                        alert(`重生失敗: ${error.message}`);
+                    });
+                },
+                
+                // Creates an initial node if none exists
+                initialize() {
+                    console.log('Initializing state');
+                    if (this.nodes.length === 0) {
+                        console.log('Adding initial node at time 0');
+                        this.addNode(0);
+                    }
+                },
+                
+                // Updates all UI components to reflect current state
+                updateUI() {
+                    console.log('Updating UI');
+                    updateTimelineView();
+                    updateNodeTable();
+                    updateNodeControls();
+                    console.log('UI update complete');
+                }
+            };
+            
+            // DOM Element references
+            const timelineEl = document.getElementById('timeline');
+            const addNodeTimeEl = document.getElementById('add-node-time');
+            const addNodeBtnEl = document.getElementById('add-node-btn');
+            const statusMessageEl = document.getElementById('status-message');
+            const currentNodeEl = document.getElementById('current-node');
+            const prevNodeBtnEl = document.getElementById('prev-node-btn');
+            const nextNodeBtnEl = document.getElementById('next-node-btn');
+            const nodeTimeEl = document.getElementById('node-time');
+            const updateTimeBtnEl = document.getElementById('update-time-btn');
+            const deleteNodeBtnEl = document.getElementById('delete-node-btn');
+            const transitionTextEl = document.getElementById('transition-text');
+            const nodeSeedEl = document.getElementById('node-seed');
+            const randomSeedBtnEl = document.getElementById('random-seed-btn');
+            const imageUploadEl = document.getElementById('image-upload');
+            const nodeTableEl = document.getElementById('node-table');
+            const processBtnEl = document.getElementById('process-btn');
+            const outputTextEl = document.getElementById('output-text');
+            
+            // 修改：確保 loadStoryboardBtnEl 引用正確的按鈕ID
+            const loadStoryboardBtnEl = document.getElementById('load-storyboard-btn');
+            
+            // Creates time markers on the timeline
+            function initializeTimeMarkers() {
+                console.log('Initializing time markers with zoom:', state.zoom);
+                
+                // Clear existing markers
+                const existingMarkers = timelineEl.querySelectorAll('.time-marker');
+                existingMarkers.forEach(marker => marker.remove());
+                
+                // Adjust timeline content width based on zoom
+                const contentWidth = 100 * state.zoom; // Base width * zoom factor
+                timelineEl.style.width = `${contentWidth}%`;
+                
+                // Calculate pixels per second
+                const pixelsPerSecond = (timelineEl.clientWidth - 200) / TIMELINE_LENGTH; 
+                
+                // Add time markers at 10-second intervals
+                for (let i = 0; i <= TIMELINE_LENGTH; i += 10) {
+                    const pixelPosition = i * pixelsPerSecond;
+                    
+                    const marker = document.createElement('div');
+                    marker.className = 'time-marker';
+                    marker.style.left = `${pixelPosition + 100}px`; // Add left padding
+                    marker.textContent = `${i}s`;
+                    timelineEl.appendChild(marker);
+                }
+            }
+            
+            // Updates the visual representation of nodes on the timeline
+            function updateTimelineView() {
+                console.log('Updating timeline view with zoom:', state.zoom);
+                
+                // Clear existing nodes and image containers
+                const existingNodes = timelineEl.querySelectorAll('.node-marker, .node-image-container');
+                existingNodes.forEach(node => node.remove());
+                
+                // Calculate pixels per second
+                const pixelsPerSecond = (timelineEl.clientWidth - 200) / TIMELINE_LENGTH;
+                
+                // Add node markers and image containers for each node
+                state.nodes.forEach(node => {
+                    // Calculate position based on time
+                    const pixelPosition = node.time * pixelsPerSecond;
+                    
+                    // Create image container
+                    const imageContainer = document.createElement('div');
+                    imageContainer.className = 'node-image-container';
+                    imageContainer.id = `node-image-${node.index}`;
+                    imageContainer.style.left = `${pixelPosition + 100}px`; // Add left padding
+                    
+                    // Add image or placeholder
+                    if (node.hasImage && node.imageUrl) {
+                        const img = document.createElement('img');
+                        img.src = node.imageUrl;
+                        imageContainer.appendChild(img);
+                    } else {
+                        const dropMessage = document.createElement('div');
+                        dropMessage.className = 'drop-message';
+                        dropMessage.textContent = 'Click to upload image';
+                        imageContainer.appendChild(dropMessage);
+                    }
+                    
+                    // Add click event for image upload or generation via buttons
+                    imageContainer.addEventListener('click', (e) => {
+                        console.log(`Image container clicked for node ${node.index}`);
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        // 選中該節點
+                        selectNode(node.index);
+
+                        // 第一個節點只能上傳
+                        if (node.index === 0) {
+                            imageUploadEl.click();
+                            return;
+                        }
+
+                        // 其他節點：顯示動作選單（按鈕）
+                        showImageActionDialog(node.index);
+                    });
+                    
+                    // Add drag and drop events
+                    imageContainer.addEventListener('dragover', e => {
+                        e.preventDefault();
+                        imageContainer.style.borderColor = 'var(--primary-color)';
+                        imageContainer.style.backgroundColor = 'rgba(67, 97, 238, 0.1)';
+                    });
+                    
+                    imageContainer.addEventListener('dragleave', () => {
+                        imageContainer.style.borderColor = '';
+                        imageContainer.style.backgroundColor = '';
+                    });
+                    
+                    imageContainer.addEventListener('drop', e => {
+                        console.log(`File dropped on node ${node.index}`);
+                        e.preventDefault();
+                        e.stopPropagation();
+                        
+                        imageContainer.style.borderColor = '';
+                        imageContainer.style.backgroundColor = '';
+                        
+                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                            const file = e.dataTransfer.files[0];
+                            
+                            // 選中該節點
+                            selectNode(node.index);
+                            
+                            // 更新圖片
+                            state.updateNodeImage(node.index, file);
+                        }
+                    });
+                    
+                    timelineEl.appendChild(imageContainer);
+                    
+                    // Create node marker
+                    const marker = document.createElement('div');
+                    marker.className = 'node-marker';
+                    marker.id = `node-${node.index}`;
+                    marker.style.left = `${pixelPosition + 100}px`; // 加上左padding
+                    marker.textContent = node.index;
+                    marker.setAttribute('data-index', node.index);
+                    marker.setAttribute('data-time', node.time);
+                    
+                    // 特殊處理第一個和最後一個節點
+                    const isLastNode = node.index === state.nodes.length - 1;
+                    
+                    // 為第一個節點和最後一個節點使用特殊樣式
+                    if (node.index === 0 || isLastNode) {
+                        marker.style.background = 'var(--accent-color)';
+                        
+                        // 最後一個節點可以移動，只有第一個節點不能移動
+                        if (node.index === 0) {
+                            marker.setAttribute('data-index', "0");
+                            marker.style.cursor = 'not-allowed';
+                        }
+                    }
+                    
+                    // Mark selected node
+                    if (node.index === state.currentNodeIndex) {
+                        marker.classList.add('selected');
+                        imageContainer.style.borderColor = 'var(--primary-color)';
+                    }
+                    
+                    // Add event listener for selection
+                    marker.addEventListener('click', (e) => {
+                        console.log(`Node marker clicked for node ${node.index}`);
+                        e.preventDefault();
+                        e.stopPropagation();
+                        selectNode(node.index);
+                    });
+                    
+                    // Add drag functionality (except for first node)
+                    if (node.index !== 0) {
+                        initDrag(marker);
+                    }
+                    
+                    timelineEl.appendChild(marker);
+                });
+                
+                console.log('Timeline view updated');
+            }
+
+            // Initialize drag functionality for a node marker
+            function initDrag(element) {
+                let isDragging = false;
+                let startX, startLeft;
+                let animationFrame = null;
+                let lastX = 0;
+                
+                element.addEventListener('mousedown', e => {
+                    // Only start drag on left mouse button
+                    if (e.button !== 0) return;
+                    
+                    // Prevent selection and default behavior
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    isDragging = true;
+                    startX = e.clientX;
+                    lastX = startX;
+                    
+                    // 獲取起始位置 (單位: 像素)
+                    startLeft = parseFloat(getComputedStyle(element).left) - 100; // 減去左padding
+                    
+                    // 添加拖動時的樣式
+                    element.style.zIndex = "100";
+                    element.style.boxShadow = "0 0 12px rgba(0, 0, 0, 0.5)";
+                    element.style.transform = "scale(1.1)";
+                    
+                    // Create tooltip
+                    const timeTooltip = document.createElement('div');
+                    timeTooltip.className = 'time-tooltip';
+                    timeTooltip.style.top = `${element.offsetTop - 25}px`;
+                    document.body.appendChild(timeTooltip);
+                    
+                    // 為相應的圖片容器也加上拖動樣式
+                    const nodeIndex = parseInt(element.getAttribute('data-index'));
+                    const imageContainer = document.getElementById(`node-image-${nodeIndex}`);
+                    if (imageContainer) {
+                        imageContainer.style.zIndex = "99";
+                        imageContainer.style.boxShadow = "0 0 12px rgba(0, 0, 0, 0.3)";
+                    }
+                    
+                    // 每秒的間距 (單位: 像素)
+                    const pixelsPerSecond = (timelineEl.clientWidth - 200) / TIMELINE_LENGTH;
+                    
+                    function onMouseMove(e) {
+                        if (!isDragging) return;
+                        
+                        // 如果滑鼠沒有明顯移動，避免不必要的更新
+                        if (Math.abs(e.clientX - lastX) < 1) return;
+                        lastX = e.clientX;
+                        
+                        // 使用 requestAnimationFrame 優化性能
+                        if (animationFrame) {
+                            cancelAnimationFrame(animationFrame);
+                        }
+                        
+                        animationFrame = requestAnimationFrame(() => {
+                            // 計算水平位移
+                            const dx = e.clientX - startX;
+                            
+                            // 計算新位置 (單位: 像素)
+                            const newLeft = startLeft + dx;
+                            
+                            // 限制在有效範圍內
+                            const maxLeft = (timelineEl.clientWidth - 200);
+                            const constrainedLeft = Math.max(0, Math.min(maxLeft, newLeft));
+                            
+                            // 根據像素位置計算時間
+                            const newTime = constrainedLeft / pixelsPerSecond;
+                            
+                            // 更新節點標記位置
+                            element.style.left = `${constrainedLeft + 100}px`; // 加上左padding
+                            element.setAttribute('data-time', newTime.toFixed(1));
+                            
+                            // 同時更新相應的圖片容器位置
+                            const nodeIndex = parseInt(element.getAttribute('data-index'));
+                            const imageContainer = document.getElementById(`node-image-${nodeIndex}`);
+                            if (imageContainer) {
+                                imageContainer.style.left = `${constrainedLeft + 100}px`;
+                            }
+                            
+                            // 更新時間提示
+                            timeTooltip.textContent = `${newTime.toFixed(1)}s`;
+                            timeTooltip.style.left = `${e.clientX + 10}px`;
+                        });
+                    }
+                    
+                    function onMouseUp(e) {
+                        if (!isDragging) return;
+                        
+                        // 清除動畫幀
+                        if (animationFrame) {
+                            cancelAnimationFrame(animationFrame);
+                            animationFrame = null;
+                        }
+                        
+                        // 移除拖動樣式
+                        element.style.zIndex = "";
+                        element.style.boxShadow = "";
+                        element.style.transform = "";
+                        
+                        // 移除圖片容器樣式
+                        const nodeIndex = parseInt(element.getAttribute('data-index'));
+                        const imageContainer = document.getElementById(`node-image-${nodeIndex}`);
+                        if (imageContainer) {
+                            imageContainer.style.zIndex = "";
+                            imageContainer.style.boxShadow = "";
+                        }
+                        
+                        // 獲取最終時間位置
+                        const finalTime = parseFloat(element.getAttribute('data-time'));
+                        
+                        // 更新狀態中的節點時間
+                        state.updateNodeTime(nodeIndex, finalTime);
+                        
+                        // 更新 UI
+                        state.updateUI();
+                        
+                        // 移除時間提示
+                        timeTooltip.remove();
+                        
+                        // 清理
+                        isDragging = false;
+                        document.removeEventListener('mousemove', onMouseMove);
+                        document.removeEventListener('mouseup', onMouseUp);
+                    }
+                    
+                    // 添加全局鼠標移動和鬆開處理器
+                    document.addEventListener('mousemove', onMouseMove);
+                    document.addEventListener('mouseup', onMouseUp);
+                });
+            }
+
+            function processStoryboard() {
+                console.log('[GLOBAL FUNCTION] processStoryboard called. Showing confirmation dialog...');
+                
+                // 檢查是否有節點
+                if (state.nodes.length === 0) {
+                    alert('請先添加至少一個節點到故事板中。');
+                    return;
+                }
+                
+                // 檢查是否所有節點都有圖片
+                const missingImages = state.nodes.filter(node => !node.hasImage);
+                if (missingImages.length > 0) {
+                    const missingIndices = missingImages.map(node => node.index).join(', ');
+                    alert(`節點 ${missingIndices} 缺少圖片，請先上傳圖片。`);
+                    return;
+                }
+                
+                // 顯示確認對話框
+                const confirmMessage = `確定要建立專案並開始處理故事板嗎？\n\n` +
+                                    `節點數量: ${state.nodes.length}\n` +
+                                    `這將創建一個新的專案資料夾並開始視頻處理任務。`;
+                
+                const userConfirmed = confirm(confirmMessage);
+                
+                if (userConfirmed) {
+                    console.log('[GLOBAL FUNCTION] User confirmed. Calling state.processStoryboard...');
+                    const result = state.processStoryboard();
+                    
+                    if (outputTextEl) {
+                        outputTextEl.value = result;
+                    } else {
+                        console.error('[GLOBAL FUNCTION] outputTextEl is null. Cannot display result:', result);
+                    }
+                } else {
+                    console.log('[GLOBAL FUNCTION] User cancelled process storyboard.');
+                    if (outputTextEl) {
+                        outputTextEl.value = '用戶取消了故事板處理。';
+                    }
+                }
+            }
+            
+            // Update the node controls
+            function updateNodeControls() {
+                console.log('Updating node controls');
+                const activeNode = state.getActiveNode();
+                
+                if (activeNode) {
+                    console.log(`Updating controls for node ${activeNode.index}`);
+                    // Update node indicator
+                    currentNodeEl.textContent = activeNode.index;
+                    
+                    // Update node time input
+                    nodeTimeEl.value = activeNode.time;
+                    
+                    // Update transition text
+                    transitionTextEl.value = activeNode.transitionText || '';
+                    
+                    // Update seed
+                    nodeSeedEl.value = activeNode.seed !== undefined && activeNode.seed !== null ? activeNode.seed : '';
+                    
+                    // 判斷是否為最後一個節點
+                    const isLastNode = activeNode.index === state.nodes.length - 1;
+                    
+                    // 修改這部分：僅當是最後一個節點時禁用轉場描述
+                    // 或者當只有一個節點時（因為沒有目標節點）
+                    transitionTextEl.disabled = isLastNode || state.nodes.length === 1;
+                    
+                    if (isLastNode) {
+                        transitionTextEl.value = 'No transition needed for the last node';
+                    }
+                    
+                    // Disable/enable buttons based on node index
+                    prevNodeBtnEl.disabled = activeNode.index === 0;
+                    nextNodeBtnEl.disabled = activeNode.index === state.nodes.length - 1;
+                    deleteNodeBtnEl.disabled = activeNode.index === 0;
+                    
+                    // Disable/enable time input based on node index
+                    nodeTimeEl.disabled = activeNode.index === 0;
+                    updateTimeBtnEl.disabled = activeNode.index === 0;
+                } else {
+                    console.log('No active node found');
+                }
+            }
+            
+            // Update the node table
+            function updateNodeTable() {
+                console.log('Updating node table');
+                const tbody = nodeTableEl.querySelector('tbody');
+                tbody.innerHTML = '';
+                
+                state.nodes.forEach(node => {
+                    const row = document.createElement('tr');
+                    if (node.index === state.currentNodeIndex) {
+                        row.classList.add('selected');
+                    }
+                    
+                    // Add click event to select node
+                    row.addEventListener('click', () => {
+                        console.log(`Table row clicked for node ${node.index}`);
+                        selectNode(node.index);
+                    });
+                    
+                    // Node index
+                    const indexCell = document.createElement('td');
+                    indexCell.textContent = node.index;
+                    row.appendChild(indexCell);
+                    
+                    // Node time
+                    const timeCell = document.createElement('td');
+                    timeCell.textContent = node.time;
+                    row.appendChild(timeCell);
+                    
+                    // Has image
+                    const imageCell = document.createElement('td');
+                    imageCell.textContent = node.hasImage ? 'Yes' : 'No';
+                    row.appendChild(imageCell);
+                    
+                    // Transition text
+                    const transitionCell = document.createElement('td');
+                    const transitionText = node.transitionText || '';
+                    transitionCell.textContent = transitionText.length > 20 
+                        ? transitionText.substring(0, 20) + '...' 
+                        : transitionText;
+                    row.appendChild(transitionCell);
+                    
+                    // Seed
+                    const seedCell = document.createElement('td');
+                    seedCell.textContent = node.seed !== undefined && node.seed !== null ? node.seed : 'Random';
+                    row.appendChild(seedCell);
+                    
+                    tbody.appendChild(row);
+                });
+            }
+            
+            // Select a node
+            function selectNode(nodeIndex) {
+                console.log(`Selecting node ${nodeIndex}`);
+                state.currentNodeIndex = nodeIndex;
+                state.updateUI();
+            }
+            
+            // Navigate to previous/next node
+            function navigateNode(direction) {
+                console.log(`Navigating ${direction}`);
+                const currentIdx = state.currentNodeIndex;
+                let newIdx = currentIdx;
+                
+                if (direction === 'prev' && currentIdx > 0) {
+                    newIdx = currentIdx - 1;
+                } else if (direction === 'next' && currentIdx < state.nodes.length - 1) {
+                    newIdx = currentIdx + 1;
+                }
+                
+                if (newIdx !== currentIdx) {
+                    console.log(`Navigating from node ${currentIdx} to ${newIdx}`);
+                    selectNode(newIdx);
+                }
+            }
+            
+            // Set up event listeners
+            function setupEventListeners() {
+                console.log('Setting up event listeners');
+                
+                // Add node button
+                addNodeBtnEl.addEventListener('click', () => {
+                    console.log('Add node button clicked');
+                    addNode();
+                });
+                
+                // Navigate nodes
+                prevNodeBtnEl.addEventListener('click', () => {
+                    console.log('Previous node button clicked');
+                    navigateNode('prev');
+                });
+                
+                nextNodeBtnEl.addEventListener('click', () => {
+                    console.log('Next node button clicked');
+                    navigateNode('next');
+                });
+                
+                // Update node time
+                updateTimeBtnEl.addEventListener('click', () => {
+                    console.log('Update time button clicked');
+                    updateNodeTime();
+                });
+                
+                // Delete node
+                deleteNodeBtnEl.addEventListener('click', () => {
+                    console.log('Delete node button clicked');
+                    deleteNode();
+                });
+                
+                // Update transition text
+                transitionTextEl.addEventListener('input', () => {
+                    console.log('Transition text updated');
+                    state.updateTransitionText(state.currentNodeIndex, transitionTextEl.value);
+                    updateNodeTable();
+                });
+                
+                // Update seed
+                nodeSeedEl.addEventListener('input', () => {
+                    console.log('Node seed updated');
+                    const seedValue = nodeSeedEl.value === '' ? null : parseInt(nodeSeedEl.value);
+                    state.updateNodeSeed(state.currentNodeIndex, seedValue);
+                    updateNodeTable();
+                });
+                
+                // Random seed button
+                randomSeedBtnEl.addEventListener('click', () => {
+                    console.log('Random seed button clicked');
+                    const randomSeed = Math.floor(Math.random() * 2147483647);
+                    nodeSeedEl.value = randomSeed;
+                    state.updateNodeSeed(state.currentNodeIndex, randomSeed);
+                    updateNodeTable();
+                });
+                
+                // Process storyboard
+                processBtnEl.addEventListener('click', () => {
+                    console.log('[EVENT LISTENER] Process button clicked. Calling global processStoryboard function...');
+                    processStoryboard();
+                });
+                
+                // 修改：確保 loadStoryboardBtnEl 的事件監聽器正確設置
+                loadStoryboardBtnEl.addEventListener('click', () => {
+                    console.log('Load storyboard button clicked');
+                    listAvailableStoryboards();
+                });
+                
+                // Handle window resize
+                window.addEventListener('resize', () => {
+                    console.log('Window resized');
+                    state.updateUI();
+                });
+            }
+
+            // Add a new node
+            function addNode() {
+                console.log('Adding node...');
+                const time = parseFloat(addNodeTimeEl.value);
+                console.log(`Attempting to add node at time: ${time}s`);
+                
+                const result = state.addNode(time);
+                console.log('Add node result:', result);
+                
+                statusMessageEl.textContent = result.message;
+                
+                if (result.success) {
+                    console.log('Node added successfully, updating UI');
+                    state.updateUI();
+                    addNodeTimeEl.value = DEFAULT_NODE_TIME;
+                } else {
+                    console.log('Failed to add node');
+                }
+            }
+
+            // Handle image upload
+            function setupImageUpload() {
+                console.log('Setting up image upload');
+                
+                // Handle file selection
+                imageUploadEl.addEventListener('change', (e) => {
+                    console.log('File selection changed', e);
+                    
+                    if (imageUploadEl.files && imageUploadEl.files[0]) {
+                        const file = imageUploadEl.files[0];
+                        console.log(`Selected file: ${file.name}, size: ${file.size}, type: ${file.type}`);
+                        
+                        console.log(`Attempting to update image for node ${state.currentNodeIndex}`);
+                        state.updateNodeImage(state.currentNodeIndex, file);
+                    }
+                });
+            }
+            
+            // Setup zoom functionality
+            function setupZoom() {
+                console.log('Setting up zoom functionality');
+                const timelineContainer = document.querySelector('.timeline-container');
+                
+                // 添加防抖動以避免過多更新
+                let zoomTimeout = null;
+                
+                timelineContainer.addEventListener('wheel', (e) => {
+                    // 阻止頁面滾動
+                    e.preventDefault();
+                    
+                    // 清除之前的計時器
+                    if (zoomTimeout) {
+                        clearTimeout(zoomTimeout);
+                    }
+                    
+                    // 設置新的計時器，以減少過多的更新
+                    zoomTimeout = setTimeout(() => {
+                        // 根據鼠標位置計算縮放中心點
+                        const rect = timelineContainer.getBoundingClientRect();
+                        const mouseX = e.clientX - rect.left;
+                        const scrollLeft = timelineContainer.scrollLeft;
+                        const viewportX = mouseX + scrollLeft;
+                        
+                        // 計算鼠標位置相對於內容的比例位置
+                        const timelineContent = document.querySelector('.timeline-content');
+                        const beforeZoomWidth = timelineContent.scrollWidth;
+                        const zoomCenter = viewportX / beforeZoomWidth;
+                        
+                        // 計算新的縮放級別
+                        const delta = e.deltaY > 0 ? 1 / ZOOM_FACTOR : ZOOM_FACTOR;
+                        const newZoom = Math.min(Math.max(state.zoom * delta, MIN_ZOOM), MAX_ZOOM);
+                        
+                        // 如果縮放級別沒有改變，直接返回
+                        if (newZoom === state.zoom) return;
+                        
+                        console.log(`Zoom changed from ${state.zoom} to ${newZoom}`);
+                        
+                        // 更新縮放級別
+                        state.zoom = newZoom;
+                        
+                        // 強制更新 UI
+                        initializeTimeMarkers();
+                        updateTimelineView();
+                        
+                        // 計算縮放後的內容寬度
+                        const afterZoomWidth = timelineContent.scrollWidth;
+                        
+                        // 調整滾動位置，保持鼠標下的內容相對位置不變
+                        const newScrollLeft = (afterZoomWidth * zoomCenter) - mouseX;
+                        timelineContainer.scrollLeft = newScrollLeft;
+                    }, 10); // 10毫秒的防抖動延遲
+                });
+            }
+
+            // 顯示「上傳或生成」動作選單（按鈕）
+            function showImageActionDialog(nodeIndex) {
+                // 建立遮罩
+                const overlay = document.createElement('div');
+                overlay.style.position = 'fixed';
+                overlay.style.top = '0';
+                overlay.style.left = '0';
+                overlay.style.width = '100%';
+                overlay.style.height = '100%';
+                overlay.style.background = 'rgba(0,0,0,0.5)';
+                overlay.style.zIndex = '10000';
+                overlay.style.display = 'flex';
+                overlay.style.alignItems = 'center';
+                overlay.style.justifyContent = 'center';
+
+                // 建立對話框
+                const dialog = document.createElement('div');
+                dialog.style.background = '#fff';
+                dialog.style.padding = '20px';
+                dialog.style.borderRadius = '10px';
+                dialog.style.minWidth = '260px';
+                dialog.style.boxShadow = '0 6px 20px rgba(0,0,0,0.2)';
+
+                const title = document.createElement('div');
+                title.textContent = `選擇動作（節點 ${nodeIndex}）`;
+                title.style.fontWeight = '600';
+                title.style.marginBottom = '12px';
+                dialog.appendChild(title);
+
+                const btnRow = document.createElement('div');
+                btnRow.style.display = 'flex';
+                btnRow.style.gap = '10px';
+                btnRow.style.justifyContent = 'space-between';
+
+                const uploadBtn = document.createElement('button');
+                uploadBtn.textContent = '上傳圖片';
+                uploadBtn.className = 'button-primary';
+                uploadBtn.style.flex = '1';
+                uploadBtn.style.fontSize = '13px';
+                uploadBtn.style.padding = '8px 12px';
+                uploadBtn.style.whiteSpace = 'nowrap';
+                uploadBtn.onclick = () => {
+                    imageUploadEl.click();
+                    document.body.removeChild(overlay);
+                };
+
+                const genBtn = document.createElement('button');
+                genBtn.textContent = '生成圖片';
+                genBtn.style.flex = '1';
+                genBtn.style.fontSize = '13px';
+                genBtn.style.padding = '8px 12px';
+                genBtn.style.whiteSpace = 'nowrap';
+                genBtn.onclick = () => {
+                    const prevIndex = Math.max(0, nodeIndex - 1);
+                    const prevNode = state.nodes[prevIndex];
+                    const transitionText = state.nodes[prevIndex]?.transitionText || '';
+                    const confirmMsg = `將根據前一個節點(索引 ${prevIndex})的圖片與當前節點的描述(prompt)隨機生成最後幀。\n\n是否繼續?`;
+                    const ok = window.confirm(confirmMsg);
+                    if (!ok) return;
+
+                    // 準備前一張圖片資料
+                    let prevImagePayload = {};
+                    if (prevNode && prevNode.hasImage && prevNode.imageUrl) {
+                        if (prevNode.imageUrl.startsWith('data:')) {
+                            const parts = prevNode.imageUrl.split(',');
+                            if (parts.length === 2) {
+                                prevImagePayload.prev_image_data = parts[1];
+                                prevImagePayload.prev_image_type = prevNode.imageUrl.split(';')[0].split(':')[1] || 'image/png';
+                            }
+                        }
+                    }
+
+                    // 計算兩節點時間差，作為影片長度（秒）
+                    const currNode = state.nodes[nodeIndex];
+                    const durationSeconds = Number(currNode.time) - Number(prevNode.time);
+
+                    fetch('/generate_node_image', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            node_index: nodeIndex,
+                            prev_node_index: prevIndex,
+                            has_prev_image: !!(prevNode && prevNode.hasImage),
+                            transition_text: transitionText,
+                            duration_seconds: durationSeconds,
+                            ...prevImagePayload
+                        })
+                    })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.status === 'queued' && data.job_id) {
+                            // 顯示進度對話框
+                            showPreviewProgressDialog(data.job_id, nodeIndex);
+                        } else {
+                            if (statusMessageEl) statusMessageEl.textContent = data.message || '生成請求失敗';
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Generate image request error:', err);
+                        if (statusMessageEl) {
+                            statusMessageEl.textContent = `生成請求失敗: ${err.message}`;
+                        }
+                    })
+                    .finally(() => {
+                        if (overlay && overlay.parentNode === document.body) {
+                            document.body.removeChild(overlay);
+                        }
+                    });
+                };
+
+                const cancelBtn = document.createElement('button');
+                cancelBtn.textContent = '取消';
+                cancelBtn.style.flex = '1';
+                cancelBtn.style.fontSize = '13px';
+                cancelBtn.style.padding = '8px 12px';
+                cancelBtn.style.whiteSpace = 'nowrap';
+                cancelBtn.onclick = () => {
+                    document.body.removeChild(overlay);
+                };
+
+                btnRow.appendChild(uploadBtn);
+                btnRow.appendChild(genBtn);
+                btnRow.appendChild(cancelBtn);
+                dialog.appendChild(btnRow);
+
+                overlay.appendChild(dialog);
+                overlay.addEventListener('click', (e) => {
+                    if (e.target === overlay) {
+                        document.body.removeChild(overlay);
+                    }
+                });
+                document.body.appendChild(overlay);
+            }
+
+            // 顯示生成預覽進度與結果
+            function showPreviewProgressDialog(jobId, nodeIndex) {
+                // 建立遮罩
+                const overlay = document.createElement('div');
+                overlay.style.position = 'fixed';
+                overlay.style.top = '0';
+                overlay.style.left = '0';
+                overlay.style.width = '100%';
+                overlay.style.height = '100%';
+                overlay.style.background = 'rgba(0,0,0,0.5)';
+                overlay.style.zIndex = '10000';
+                overlay.style.display = 'flex';
+                overlay.style.alignItems = 'center';
+                overlay.style.justifyContent = 'center';
+
+                const box = document.createElement('div');
+                box.style.background = '#fff';
+                box.style.padding = '20px';
+                box.style.borderRadius = '10px';
+                box.style.minWidth = '320px';
+                box.style.boxShadow = '0 6px 20px rgba(0,0,0,0.2)';
+
+                const title = document.createElement('div');
+                title.textContent = '圖片生成中...';
+                title.style.fontWeight = '600';
+                title.style.marginBottom = '12px';
+                box.appendChild(title);
+
+                const progressWrap = document.createElement('div');
+                progressWrap.style.width = '100%';
+                progressWrap.style.height = '10px';
+                progressWrap.style.background = '#eee';
+                progressWrap.style.borderRadius = '6px';
+                progressWrap.style.overflow = 'hidden';
+
+                const bar = document.createElement('div');
+                bar.style.height = '100%';
+                bar.style.width = '0%';
+                bar.style.background = 'var(--primary-color)';
+                bar.style.transition = 'width 0.3s ease';
+                progressWrap.appendChild(bar);
+                box.appendChild(progressWrap);
+
+                const msg = document.createElement('div');
+                msg.style.marginTop = '10px';
+                msg.style.fontSize = '12px';
+                msg.textContent = '準備中...';
+                box.appendChild(msg);
+
+                const preview = document.createElement('img');
+                preview.style.display = 'none';
+                preview.style.marginTop = '12px';
+                preview.style.maxWidth = '100%';
+                preview.style.border = '1px solid #eee';
+                preview.style.borderRadius = '6px';
+                box.appendChild(preview);
+
+                const btnRow = document.createElement('div');
+                btnRow.style.display = 'flex';
+                btnRow.style.gap = '10px';
+                btnRow.style.marginTop = '12px';
+
+                const okBtn = document.createElement('button');
+                okBtn.textContent = '確定';
+                okBtn.className = 'button-primary';
+                okBtn.style.flex = '1';
+                okBtn.disabled = true;
+                okBtn.style.pointerEvents = 'none'; // 禁止 hover 影響樣式與互動
+                okBtn.onclick = () => {
+                    document.body.removeChild(overlay);
+                };
+
+                const cancelBtn = document.createElement('button');
+                cancelBtn.textContent = '取消';
+                cancelBtn.style.flex = '1';
+                cancelBtn.onclick = () => {
+                    // 呼叫後端取消，並等待狀態變更
+                    fetch(`/cancel_preview?id=${encodeURIComponent(jobId)}`)
+                        .then(() => {
+                            // 等待任務變為 cancelled
+                            const waitCancel = setInterval(() => {
+                                fetch(`/preview_status?id=${encodeURIComponent(jobId)}`)
+                                    .then(r => r.json())
+                                    .then(data => {
+                                        if (data.status === 'success' && data.task && (data.task.status === 'cancelled' || data.task.status === 'error' || data.task.status === 'completed')) {
+                                            clearInterval(waitCancel);
+                                            if (typeof timer !== 'undefined' && timer) clearInterval(timer);
+                                            document.body.removeChild(overlay);
+                                        }
+                                    })
+                                    .catch(() => {})
+                            }, 800);
+                        })
+                        .catch(() => {
+                            // 若取消請求失敗，也嘗試關閉
+                            if (typeof timer !== 'undefined' && timer) clearInterval(timer);
+                            document.body.removeChild(overlay);
+                        });
+                };
+
+                btnRow.appendChild(okBtn);
+                btnRow.appendChild(cancelBtn);
+                box.appendChild(btnRow);
+
+                overlay.appendChild(box);
+                document.body.appendChild(overlay);
+
+                // 輪詢任務狀態
+                let timer = null;
+                const poll = () => {
+                    fetch(`/preview_status?id=${encodeURIComponent(jobId)}`)
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data.status === 'success' && data.task) {
+                                const t = data.task;
+                                bar.style.width = `${t.progress || 0}%`;
+                                msg.textContent = t.message || '';
+
+                                if (t.status === 'completed' && t.image_data) {
+                                    // 使用 base64 圖片數據直接顯示
+                                    preview.src = `data:${t.image_type || 'image/png'};base64,${t.image_data}`;
+                                    preview.style.display = 'block';
+                                    okBtn.disabled = false;
+                                    okBtn.style.pointerEvents = 'auto'; // 完成後恢復互動與 hover
+
+                                    // 寫回節點
+                                    if (state.nodes[nodeIndex]) {
+                                        state.nodes[nodeIndex].hasImage = true;
+                                        state.nodes[nodeIndex].imageUrl = preview.src; // 使用 base64 數據 URL
+                                        state.nodes[nodeIndex].image = null;
+                                        state.updateUI();
+                                    }
+
+                                    if (timer) clearInterval(timer);
+                                } else if (t.status === 'error') {
+                                    msg.textContent = t.message || '生成失敗';
+                                    if (timer) clearInterval(timer);
+                                    okBtn.disabled = false;
+                                    okBtn.style.pointerEvents = 'auto';
+                                }
+                            } else {
+                                msg.textContent = data.message || '狀態查詢失敗';
+                            }
+                        })
+                        .catch(err => {
+                            msg.textContent = `查詢錯誤: ${err.message}`;
+                        });
+                };
+                poll();
+                timer = setInterval(poll, 1500);
+
+                // 關閉時清理輪詢
+                // 禁止點擊遮罩直接關閉（僅允許按鈕關閉/取消）
+            }
+
+            // 其他必要的輔助函數
+            function deleteNode() {
+                console.log('Deleting node');
+                const result = state.deleteNode(state.currentNodeIndex);
+                
+                statusMessageEl.textContent = result.message;
+                
+                if (result.success) {
+                    console.log('Node deleted successfully');
+                    state.updateUI();
+                } else {
+                    console.log('Failed to delete node:', result.message);
+                }
+            }
+
+            function updateNodeTime() {
+                console.log('Updating node time');
+                const newTime = parseFloat(nodeTimeEl.value);
+                const result = state.updateNodeTime(state.currentNodeIndex, newTime);
+                
+                statusMessageEl.textContent = result.message;
+                
+                if (result.success) {
+                    console.log('Node time updated successfully');
+                    state.updateUI();
+                } else {
+                    console.log('Failed to update node time:', result.message);
+                }
+            }
+            
+            // 查詢和處理可用的故事板
+            function listAvailableStoryboards() {
+                fetch('/list_storyboards')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success' && data.files.length > 0) {
+                        // 創建選擇對話框
+                        const dialog = document.createElement('div');
+                        dialog.className = 'storyboard-dialog';
+                        dialog.style.position = 'fixed';
+                        dialog.style.top = '0';
+                        dialog.style.left = '0';
+                        dialog.style.width = '100%';
+                        dialog.style.height = '100%';
+                        dialog.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+                        dialog.style.zIndex = '9999';
+                        dialog.style.display = 'flex';
+                        dialog.style.flexDirection = 'column';
+                        dialog.style.alignItems = 'center';
+                        dialog.style.justifyContent = 'center';
+                        
+                        // 對話框內容
+                        const content = document.createElement('div');
+                        content.style.backgroundColor = 'white';
+                        content.style.padding = '30px';
+                        content.style.borderRadius = '12px';
+                        content.style.maxWidth = '80%';
+                        content.style.maxHeight = '80%';
+                        content.style.overflow = 'auto';
+                        
+                        // 標題
+                        const title = document.createElement('h2');
+                        title.textContent = 'Select Storyboard to Process';
+                        title.style.marginBottom = '20px';
+                        content.appendChild(title);
+                        
+                        // 故事板列表
+                        const list = document.createElement('div');
+                        list.style.marginBottom = '20px';
+                        
+                        data.files.forEach(file => {
+                            const item = document.createElement('div');
+                            item.style.padding = '10px';
+                            item.style.margin = '5px 0';
+                            item.style.borderRadius = '6px';
+                            item.style.backgroundColor = '#f8f9fa';
+                            item.style.cursor = 'pointer';
+                            item.style.transition = 'background-color 0.3s ease';
+                            
+                            item.innerHTML = `
+                                <strong>${file.filename}</strong><br>
+                                <small>Modified Time: ${new Date(file.modified).toLocaleString()}</small>
+                            `;
+                            
+                            item.onclick = () => {
+                                fetch(`/load_storyboard?file=${file.filename}`)
+                                    .then(response => {
+                                        if (!response.ok) {
+                                            return response.json().then(err => { throw new Error(err.message || `Failed to load storyboard: ${response.statusText}`) });
+                                        }
+                                        return response.json();
+                                    })
+                                    .then(storyboardData => {
+                                        state.nodes = [];
+                                        state.currentNodeIndex = 0;
+                                        
+                                        if (storyboardData.nodes && Array.isArray(storyboardData.nodes)) {
+                                            storyboardData.nodes.forEach((nodeData, index) => {
+                                                const newNode = {
+                                                    index: index,
+                                                    time: parseFloat(nodeData.time) || 0,
+                                                    image: null, 
+                                                    imageUrl: null, 
+                                                    transitionText: "",
+                                                    seed: nodeData.seed !== undefined ? nodeData.seed : null // 載入 seed 資訊
+                                                };
+
+                                                // 修正：更可靠地設定 hasImage 狀態
+                                                if (nodeData.imageData && nodeData.imageType) { // 優先使用 base64 圖片（後端已載入）
+                                                    newNode.hasImage = true;
+                                                    newNode.imageUrl = `data:${nodeData.imageType};base64,${nodeData.imageData}`;
+                                                } else if (nodeData.imagePath && typeof nodeData.imagePath === 'string' && nodeData.imagePath.trim() !== '') {
+                                                    // 如果沒有 base64 資料，嘗試從專案資料夾載入
+                                                    newNode.hasImage = true;
+                                                    // 使用專案資料夾路徑（後端會處理實際的檔案路徑）
+                                                    const projectFolder = storyboardData.project_folder ? storyboardData.project_folder.split('/').pop() : '';
+                                                    newNode.imageUrl = `/storyboard_outputs/${projectFolder}/images/${nodeData.imagePath.trim()}`;
+                                                } else {
+                                                    newNode.hasImage = false; // 明確設為 false
+                                                }
+                                                
+                                                state.nodes.push(newNode);
+                                            });
+                                        }
+                                        
+                                        if (storyboardData.transitions && Array.isArray(storyboardData.transitions)) {
+                                            storyboardData.transitions.forEach(transitionData => {
+                                                const fromNodeIndex = parseInt(transitionData.from_node);
+                                                if (fromNodeIndex >= 0 && fromNodeIndex < state.nodes.length && state.nodes[fromNodeIndex]) {
+                                                    state.nodes[fromNodeIndex].transitionText = transitionData.text || "";
+                                                }
+                                            });
+                                        }
+                                        
+                                        state.nodes.sort((a, b) => a.time - b.time);
+                                        state.nodes.forEach((node, i) => {
+                                            node.index = i;
+                                        });
+                                        
+                                        if (state.nodes.length > 0) {
+                                            state.currentNodeIndex = 0;
+                                        } else {
+                                            state.addNode(0); 
+                                        }
+                                        
+                                        state.updateUI();
+                                        
+                                        if (statusMessageEl) {
+                                            statusMessageEl.textContent = `Storyboard '${file.filename}' loaded successfully.`;
+                                        } else {
+                                            console.error("statusMessageEl is null. Cannot set textContent.");
+                                        }
+                                        
+                                        if (outputTextEl) {
+                                            outputTextEl.value = `Loaded storyboard: ${file.filename}\nNodes: ${state.nodes.length}\nReady to process or edit.`;
+                                        } else {
+                                            console.error("outputTextEl is null. Cannot set value.");
+                                        }
+                                        
+                                        document.getElementById('task-status-body').innerHTML = '';
+                                        state.taskIds = [];
+                                        document.getElementById('processing-status-container').style.display = 'none';
+                                        
+                                        document.body.removeChild(dialog);
+                                    })
+                                    .catch(error => {
+                                        console.error('Error loading storyboard:', error);
+                                        alert(`Error loading storyboard '${file.filename}': ${error.message}`);
+                                        statusMessageEl.textContent = `Failed to load storyboard: ${error.message}`;
+                                        if (dialog && dialog.parentNode === document.body) { // 確保對話框存在才移除
+                                           document.body.removeChild(dialog);
+                                        }
+                                    });
+                            };
+                            
+                            item.onmouseover = () => {
+                                item.style.backgroundColor = '#e9ecef';
+                            };
+                            
+                            item.onmouseout = () => {
+                                item.style.backgroundColor = '#f8f9fa';
+                            };
+                            
+                            list.appendChild(item);
+                        });
+                        
+                        content.appendChild(list);
+                        
+                        // 關閉按鈕
+                        const closeButton = document.createElement('button');
+                        closeButton.textContent = 'Cancel';
+                        closeButton.className = 'button-primary';
+                        closeButton.onclick = () => {
+                            document.body.removeChild(dialog);
+                        };
+                        content.appendChild(closeButton);
+                        
+                        dialog.appendChild(content);
+                        
+                        // 點擊背景也可以關閉
+                        dialog.onclick = (e) => {
+                            if (e.target === dialog) {
+                                document.body.removeChild(dialog);
+                            }
+                        };
+                        
+                        // 添加到頁面
+                        document.body.appendChild(dialog);
+                    } else {
+                        alert('No available storyboard files found!');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert(`Error getting storyboard list: ${error.message}`);
+                });
+            }
+            
+            // Initialize the application
+            function init() {
+                console.log('Initializing application');
+                
+                // 確保在創建標記之前初始化第一個節點
+                state.initialize();
+                
+                // 然後建立時間標記
+                initializeTimeMarkers();
+                
+                // 設置事件監聽器
+                setupEventListeners();
+                setupImageUpload();
+                setupZoom();
+                
+                // 最後更新 UI
+                state.updateUI();
+            }
+            
+            // Start the application
+            init();
+        });
+    </script>
+</body>
+</html> 

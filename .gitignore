@@ -1,0 +1,8 @@
+# Python cache
+__pycache__/
+
+# HuggingFace downloads
+hf_download/
+
+# Storyboard outputs
+storyboard_outputs/
