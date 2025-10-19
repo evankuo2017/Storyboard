@@ -1227,62 +1227,111 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 # 背景執行：依序進行 Qwen 分類與單幀生成
                 def run_job():
                     try:
-                        # 1) Qwen 分類階段：載入 → 推理 → 卸載
+                        # 1) Qwen 分類階段：載入 → 推理（延後卸載，若 label==2 還需後續框選）
                         task_status[job_id]['message'] = '分類中（Qwen）...'
                         task_status[job_id]['progress'] = 5
                         qwen_label = None
                         try:
                             try:
-                                from QwenClassification import get_qwen_model_and_processor, classify_image_edit_task
+                                from Qwen_reference import get_qwen_model_and_processor, classify_image_edit_task, extract_remove_bounding_boxes, unload_qwen
                             except Exception:
                                 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-                                from QwenClassification import get_qwen_model_and_processor, classify_image_edit_task
+                                from Qwen_reference import get_qwen_model_and_processor, classify_image_edit_task, extract_remove_bounding_boxes, unload_qwen
+
                             get_qwen_model_and_processor()
                             qwen_label = classify_image_edit_task(prev_image_file, transition_text)
                             task_status[job_id]['qwen_label'] = int(qwen_label)
                             logger.info(f"QwenClassification label: {qwen_label} (image={prev_image_file}, prompt='{transition_text}')")
                         except Exception as e:
                             logger.error(f"呼叫 QwenClassification 失敗: {e}")
-                        finally:
-                            # 若需嚴格釋放顯存，可在此處自定義卸載策略
-                            pass
 
-                        # 2) 單幀生成階段（在進入前再次清理 CUDA 快取，避免殘留）
+                        # 依 Qwen 分類結果選擇路線
                         try:
-                            if torch.cuda.is_available():
-                                try:
-                                    torch.cuda.synchronize()
-                                except Exception:
-                                    pass
-                                try:
-                                    torch.cuda.empty_cache()
-                                except Exception:
-                                    pass
-                                try:
-                                    torch.cuda.ipc_collect()
-                                except Exception:
-                                    pass
+                            label_int = int(qwen_label) if qwen_label is not None else 0
                         except Exception:
-                            pass
-                        
-                        # 進入生成
+                            label_int = 0
+
                         task_status[job_id]['message'] = '開始生成圖片...'
                         task_status[job_id]['progress'] = 10
-
-                        try:
-                            from generate_preview import generate_one_frame
-                        except Exception as e:
-                            logger.error(f"載入 generate_preview 失敗: {e}")
-                            task_status[job_id]['status'] = 'error'
-                            task_status[job_id]['message'] = '後端未安裝生成模組'
-                            return
 
                         import tempfile
                         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
                             tmp_image_path = tmp_file.name
 
                         prompt_text = transition_text or ''
-                        generate_one_frame(prev_image_file, prompt_text, tmp_image_path, progress_cb=progress_cb, cancel_cb=cancel_cb, duration_seconds=duration_seconds)
+
+                        # 分類後若非 ObjectClear (label!=2)，此時即可卸載 Qwen；
+                        if label_int != 2 and 'unload_qwen' in locals():
+                            try:
+                                unload_qwen()
+                            except Exception as _ue:
+                                logger.warning(f"Qwen 卸載失敗: {_ue}")
+                        # 根據 label 選擇實作；FLUX/ObjectClear 先輸出 placeholder 圖片，保持後處理一致
+                        if label_int == 1:
+                            logger.info("選擇 FLUX 生成")
+                            try:
+                                from reference_flux_kontext import generate_flux_frame
+                            except Exception as _ie:
+                                logger.error(f"載入 FLUX 產生器失敗: {_ie}")
+                                task_status[job_id]['status'] = 'error'
+                                task_status[job_id]['message'] = 'FLUX 模組未安裝或不可用'
+                                return
+                            try:
+                                generate_flux_frame(
+                                    image=prev_image_file,
+                                    prompt=prompt_text,
+                                    output=tmp_image_path,
+                                    guidance_scale=2.5,
+                                    precision="bf16",
+                                    local_files_only=False,
+                                )
+                            except Exception as _e:
+                                raise RuntimeError(f"FLUX 生成失敗: {_e}")
+                        elif label_int == 2:
+                            logger.info("選擇 ObjectClear：先解析移除框選，並在當前圖片上疊加框選圖")
+                            boxes_result = {"boxes": []}
+                            try:
+                                # 呼叫 Qwen 的框選抽取
+                                boxes_result = extract_remove_bounding_boxes(prev_image_file, prompt_text) or {"boxes": []}
+                                task_status[job_id]['remove_boxes'] = boxes_result
+                            except Exception as _e:
+                                logger.warning(f"ObjectClear 框選抽取失敗: {_e}")
+                            finally:
+                                # 完成框選後再卸載 Qwen
+                                if 'unload_qwen' in locals():
+                                    try:
+                                        unload_qwen()
+                                    except Exception as _ue:
+                                        logger.warning(f"Qwen 卸載失敗: {_ue}")
+
+                            # 產生框選可視化圖，輸出為預覽
+                            try:
+                                from PIL import Image, ImageDraw
+                                base_img = Image.open(prev_image_file).convert('RGBA')
+                                overlay = Image.new('RGBA', base_img.size, (0, 0, 0, 0))
+                                draw = ImageDraw.Draw(overlay)
+                                boxes = boxes_result.get('boxes', []) if isinstance(boxes_result, dict) else []
+                                for item in boxes:
+                                    box = item.get('box_xyxy') if isinstance(item, dict) else None
+                                    if isinstance(box, (list, tuple)) and len(box) == 4:
+                                        x0, y0, x1, y1 = [int(v) for v in box]
+                                        # 半透明填色 + 邊框
+                                        draw.rectangle([x0, y0, x1, y1], fill=(255, 0, 0, 60))
+                                        draw.rectangle([x0, y0, x1, y1], outline=(255, 0, 0, 255), width=3)
+                                composed = Image.alpha_composite(base_img, overlay).convert('RGB')
+                                composed.save(tmp_image_path)
+                            except Exception as _e:
+                                raise RuntimeError(f"建立 ObjectClear 框選圖失敗: {_e}")
+                        else:
+                            # FramePack 
+                            try:
+                                from generate_preview import generate_one_frame
+                            except Exception as e:
+                                logger.error(f"載入 generate_preview 失敗: {e}")
+                                task_status[job_id]['status'] = 'error'
+                                task_status[job_id]['message'] = '後端未安裝生成模組'
+                                return
+                            generate_one_frame(prev_image_file, prompt_text, tmp_image_path, progress_cb=progress_cb, cancel_cb=cancel_cb, duration_seconds=duration_seconds)
 
                         with open(tmp_image_path, 'rb') as img_file:
                             import base64
