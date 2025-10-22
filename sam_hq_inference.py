@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Union
 import numpy as np
 from PIL import Image
 import torch
+import argparse
 
 
 # 嘗試載入 SAM-HQ/SAM 模組（中文註解 + English nouns）
@@ -203,3 +204,54 @@ def generate_masks_with_sam_hq(
 
 
 
+
+
+def _default_same_dir_paths() -> tuple[Path, Path, Path, Path]:
+    """回傳同目錄預設路徑（image.jpg、bbox.json、mask.png、masks/）。"""
+    base = Path(__file__).resolve().parent
+    image_path = base / "image.jpg"
+    boxes_json = base / "bbox.json"
+    output_mask_path = base / "mask.png"
+    per_object_dir = base / "masks"
+    return image_path, boxes_json, output_mask_path, per_object_dir
+
+
+if __name__ == "__main__":
+    """
+    主程式入口：
+    - 預設自動讀取同目錄下的 image.jpg 與 bbox.json（Qwen 輸出之 bbox）
+    - 使用 SAM‑HQ 產生合併 mask（mask.png）與個別物件 masks/ 目錄
+    - 可用環境變數 SAM_HQ_CHECKPOINT 或參數 --checkpoint 指定權重（.pth）
+    """
+    parser = argparse.ArgumentParser(description="SAM-HQ inference: bbox.json -> mask.png")
+    parser.add_argument("--image", type=str, default=None, help="輸入影像路徑，預設同目錄 image.jpg")
+    parser.add_argument("--boxes", type=str, default=None, help="輸入 bbox JSON 路徑，預設同目錄 bbox.json")
+    parser.add_argument("--output", type=str, default=None, help="輸出合併 mask 路徑，預設同目錄 mask.png")
+    parser.add_argument("--per_object_dir", type=str, default=None, help="每物件 mask 輸出資料夾，預設同目錄 masks/")
+    parser.add_argument("--checkpoint", type=str, default=None, help="SAM-HQ 權重 .pth；也可使用環境變數 SAM_HQ_CHECKPOINT")
+    parser.add_argument("--model_type", type=str, default="vit_h", help="SAM 模型型號（e.g. vit_h, vit_l, vit_b, vit_tiny）")
+    parser.add_argument("--device", type=str, default=None, help="裝置：cuda/cpu；預設自動偵測")
+    parser.add_argument("--multimask_output", action="store_true", help="輸出多重候選，內部仍取最佳合併")
+    args = parser.parse_args()
+
+    # 預設使用與此檔同目錄之檔名
+    def_img, def_boxes, def_out, def_dir = _default_same_dir_paths()
+    image_path = Path(args.image) if args.image else def_img
+    boxes_json = Path(args.boxes) if args.boxes else def_boxes
+    output_mask_path = Path(args.output) if args.output else def_out
+    per_object_dir = Path(args.per_object_dir) if args.per_object_dir else def_dir
+
+    # 執行推理
+    out_path = generate_masks_with_sam_hq(
+        image_path=image_path,
+        boxes_json=boxes_json,
+        output_mask_path=output_mask_path,
+        per_object_dir=per_object_dir,
+        checkpoint=args.checkpoint,  # 若為 None 則函式內會讀 SAM_HQ_CHECKPOINT
+        model_type=args.model_type,
+        device=args.device,
+        multimask_output=args.multimask_output,
+    )
+
+    # 簡要輸出結果路徑
+    print(str(out_path))

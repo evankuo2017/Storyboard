@@ -171,11 +171,9 @@ def extract_remove_bounding_boxes(image: str, user_prompt: str, max_attempts: in
         "You are a vision assistant that returns bounding boxes for objects to remove.\n"
         "Task: From the user's prompt, extract all object categories that should be removed if present in the image.\n"
         "Look at the image and return bounding boxes for each matched object you find.\n"
-        "Be highly sensitive to very small objects and tiny details; carefully inspect the entire image (background, corners, textures) to avoid missing any target.\n"
+        "Be highly sensitive to very small objects and tiny details.\n"
         "Prefer high recall: if uncertain, include a plausible bounding box (slightly larger is acceptable) rather than missing the object.\n"
-        "Output strictly JSON with keys: image_size, format, boxes.\n"
-        "- image_size: [width, height] in pixels.\n"
-        "- format: the constant string 'SAM_xyxy_pixel'.\n"
+        "Output strictly JSON with key 'boxes'.\n"
         "- boxes: array of {label: string, box_xyxy: [x0,y0,x1,y1]} where coordinates are integer pixels,\n"
         "  0 <= x0 < x1 <= width, 0 <= y0 < y1 <= height.\n"
         "Do not include any extra text. Return JSON only."
@@ -231,10 +229,10 @@ def extract_remove_bounding_boxes(image: str, user_prompt: str, max_attempts: in
             print("[Qwen][extract_remove_bounding_boxes] 模型回傳 JSON:", raw_json)
             parsed = json.loads(raw_json)
             # 印出解析後 JSON（標準化後），利於除錯
-            try:
-                print("[Qwen][extract_remove_bounding_boxes] 解析 JSON:", json.dumps(parsed, ensure_ascii=False))
-            except Exception:
-                pass
+            #try:
+            #    print("[Qwen][extract_remove_bounding_boxes] 解析 JSON:", json.dumps(parsed, ensure_ascii=False))
+            #except Exception:
+            #    pass
             # 正規化與邊界裁切
             boxes = []
             for item in parsed.get("boxes", []):

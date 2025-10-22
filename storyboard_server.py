@@ -1306,18 +1306,56 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
 
                             # 產生框選可視化圖，輸出為預覽
                             try:
-                                from PIL import Image, ImageDraw
+                                from PIL import Image, ImageDraw, ImageFont
                                 base_img = Image.open(prev_image_file).convert('RGBA')
                                 overlay = Image.new('RGBA', base_img.size, (0, 0, 0, 0))
                                 draw = ImageDraw.Draw(overlay)
+                                W, H = base_img.size
                                 boxes = boxes_result.get('boxes', []) if isinstance(boxes_result, dict) else []
+                                # 使用預設字型
+                                try:
+                                    font = ImageFont.load_default()
+                                except Exception:
+                                    font = None
                                 for item in boxes:
                                     box = item.get('box_xyxy') if isinstance(item, dict) else None
+                                    label_text = str(item.get('label')) if isinstance(item, dict) and item.get('label') is not None else 'object'
                                     if isinstance(box, (list, tuple)) and len(box) == 4:
                                         x0, y0, x1, y1 = [int(v) for v in box]
-                                        # 半透明填色 + 邊框
-                                        draw.rectangle([x0, y0, x1, y1], fill=(255, 0, 0, 60))
+                                        # 邊界裁切
+                                        x0 = max(0, min(x0, W))
+                                        x1 = max(0, min(x1, W))
+                                        y0 = max(0, min(y0, H))
+                                        y1 = max(0, min(y1, H))
+                                        if x1 <= x0 or y1 <= y0:
+                                            continue
+                                        # 只畫邊框（不填色；避免重疊時遮蔽其他框）
                                         draw.rectangle([x0, y0, x1, y1], outline=(255, 0, 0, 255), width=3)
+
+                                        # 繪製標籤背景與文字
+                                        if font is not None and label_text:
+                                            pad = 2
+                                            # 計算文字框大小
+                                            try:
+                                                tb = draw.textbbox((0, 0), label_text, font=font)
+                                                text_w = tb[2] - tb[0]
+                                                text_h = tb[3] - tb[1]
+                                            except Exception:
+                                                text_w, text_h = draw.textsize(label_text, font=font)
+
+                                            bg_w = text_w + 2 * pad
+                                            bg_h = text_h + 2 * pad
+                                            # 盡量畫在框上方，放不下就畫在框內側
+                                            bg_x0 = x0
+                                            bg_y0 = y0 - bg_h if y0 - bg_h >= 0 else y0
+                                            if bg_x0 + bg_w > W:
+                                                bg_x0 = max(0, W - bg_w)
+                                            bg_y1 = min(H, bg_y0 + bg_h)
+                                            # 背景（半透明黑）
+                                            draw.rectangle([bg_x0, bg_y0, bg_x0 + bg_w, bg_y1], fill=(0, 0, 0, 160))
+                                            # 文字（白）
+                                            draw.text((bg_x0 + pad, bg_y0 + pad), label_text, font=font, fill=(255, 255, 255, 255))
+
                                 composed = Image.alpha_composite(base_img, overlay).convert('RGB')
                                 composed.save(tmp_image_path)
                             except Exception as _e:
