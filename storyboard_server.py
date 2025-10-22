@@ -1233,10 +1233,10 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                         qwen_label = None
                         try:
                             try:
-                                from Qwen_reference import get_qwen_model_and_processor, classify_image_edit_task, extract_remove_bounding_boxes, unload_qwen
+                                from Qwen_inference import get_qwen_model_and_processor, classify_image_edit_task, extract_remove_bounding_boxes, unload_qwen
                             except Exception:
                                 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-                                from Qwen_reference import get_qwen_model_and_processor, classify_image_edit_task, extract_remove_bounding_boxes, unload_qwen
+                                from Qwen_inference import get_qwen_model_and_processor, classify_image_edit_task, extract_remove_bounding_boxes, unload_qwen
 
                             get_qwen_model_and_processor()
                             qwen_label = classify_image_edit_task(prev_image_file, transition_text)

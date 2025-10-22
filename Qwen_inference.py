@@ -281,3 +281,4 @@ if __name__ == "__main__":
     label = classify_image_edit_task(args.image, args.user_prompt)
     print("QwenClassification label:", label)
 
+
