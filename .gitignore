@@ -6,3 +6,6 @@ hf_download/
 
 # Storyboard outputs
 storyboard_outputs/
+
+# SAM checkpoints
+checkpoints/
