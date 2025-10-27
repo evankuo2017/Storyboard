@@ -38,7 +38,7 @@ pip install -r requirements.txt
    - Set transition descriptions
    - Generate video sequences
 
-```
+
 
 ## Model Licenses
 
