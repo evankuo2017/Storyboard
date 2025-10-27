@@ -82,6 +82,10 @@ def _download_checkpoint(model_type: str, checkpoint_dir: Path) -> Path:
         raise RuntimeError(f"下載權重失敗: {e}")
 
 
+# 全局變量存儲 SAM 模型
+_global_sam_predictor = None
+_global_sam_device = None
+
 def _load_sam_model(
     checkpoint: Optional[str] = None,
     model_type: str = "vit_h",
@@ -89,6 +93,8 @@ def _load_sam_model(
     auto_download: bool = True,
 ):
     """載入 SAM 模型"""
+    global _global_sam_predictor, _global_sam_device
+    
     if checkpoint is None:
         checkpoint = os.getenv("SAM_CHECKPOINT")
     
@@ -107,10 +113,38 @@ def _load_sam_model(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # 如果已經載入了相同設備的模型，直接返回
+    if _global_sam_predictor is not None and _global_sam_device == device:
+        return _global_sam_predictor, device
+
     sam = sam_model_registry[model_type](checkpoint=checkpoint)
     sam.to(device=device)
     predictor = SamPredictor(sam)
+    
+    # 存儲到全局變量
+    _global_sam_predictor = predictor
+    _global_sam_device = device
+    
     return predictor, device
+
+
+def unload_sam_model():
+    """卸載 SAM 模型以釋放顯存"""
+    global _global_sam_predictor, _global_sam_device
+    
+    if _global_sam_predictor is not None:
+        # 清理模型
+        if hasattr(_global_sam_predictor, 'model'):
+            del _global_sam_predictor.model
+        del _global_sam_predictor
+        _global_sam_predictor = None
+        _global_sam_device = None
+        
+        # 清理顯存
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        print("SAM 模型已卸載")
 
 
 def _ensure_xyxy(box: List[int]) -> List[int]:
@@ -216,6 +250,10 @@ def generate_masks_with_sam(
 
     # 輸出合併 mask
     _save_mask_png(merged_mask, output_mask_path)
+    
+    # 推理完成後清理顯存
+    unload_sam_model()
+    
     return str(output_mask_path)
 
 

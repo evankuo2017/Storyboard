@@ -27,10 +27,17 @@ def get_qwen_model_and_processor():
         return _cached_model, _cached_processor
 
     print("[Qwen] 載入 Qwen2.5-VL-7B-Instruct 模型與 Processor ...")
+    
+    # 使用更明確的設備設置，避免 device_map="auto" 導致的設備不匹配
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        "Qwen/Qwen2.5-VL-7B-Instruct", torch_dtype="auto", device_map="auto", cache_dir=cache_dir
+        "Qwen/Qwen2.5-VL-7B-Instruct", 
+        torch_dtype="auto", 
+        device_map=device, 
+        cache_dir=cache_dir
     )
     processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-7B-Instruct", cache_dir=cache_dir)
+    
     print("[Qwen] 模型與 Processor 載入完成")
 
     _cached_model = model
@@ -62,6 +69,12 @@ def unload_qwen() -> None:
             del proc_ref
         except Exception:
             pass
+        
+        # 強制清理 GPU 顯存
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            print("[Qwen] 已清理 GPU 顯存")
+            
     except Exception:
         pass
 
@@ -133,6 +146,14 @@ def classify_image_edit_task(image: str, user_prompt: str, max_attempts: int = 5
         padding=True,
         return_tensors="pt",
     )
+    
+    # 確保所有輸入張量都在正確的設備上
+    if torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
+    
+    inputs = {k: v.to(device) if hasattr(v, 'to') else v for k, v in inputs.items()}
 
     attempt = 0
     generated_ids = None
@@ -141,7 +162,7 @@ def classify_image_edit_task(image: str, user_prompt: str, max_attempts: int = 5
     while attempt < max_attempts:
         generated_ids = model.generate(**inputs, max_new_tokens=128)
         generated_ids_trimmed = [
-            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs['input_ids'], generated_ids)
         ]
         output_text = processor.batch_decode(
             generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
@@ -217,6 +238,14 @@ def extract_remove_bounding_boxes(image: str, user_prompt: str, max_attempts: in
         padding=True,
         return_tensors="pt",
     )
+    
+    # 確保所有輸入張量都在正確的設備上
+    if torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
+    
+    inputs = {k: v.to(device) if hasattr(v, 'to') else v for k, v in inputs.items()}
 
     attempt = 0
     result_obj = {
@@ -227,7 +256,7 @@ def extract_remove_bounding_boxes(image: str, user_prompt: str, max_attempts: in
 
     while attempt < max_attempts:
         out_ids = model.generate(**inputs, max_new_tokens=256)
-        trimmed = [o[len(i):] for i, o in zip(inputs.input_ids, out_ids)]
+        trimmed = [o[len(i):] for i, o in zip(inputs['input_ids'], out_ids)]
         text_out = processor.batch_decode(trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)
         raw = (text_out[0] if text_out else "").strip()
         # 嘗試定位 JSON 區段

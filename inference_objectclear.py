@@ -7,6 +7,10 @@ from objectclear.utils import resize_by_short_side
 from PIL import Image
 import numpy as np
 
+# 全局變量存儲 ObjectClear 模型
+_global_objectclear_pipe = None
+_global_objectclear_device = None
+
 
 
 def infer_on_two_images(
@@ -28,6 +32,8 @@ def infer_on_two_images(
     - output_path: 輸出圖片路徑（若為 None，將輸出到 results 目錄）
     其餘參數對應 CLI 旗標。
     """
+    global _global_objectclear_pipe, _global_objectclear_device
+    
     if device is None:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -37,14 +43,22 @@ def infer_on_two_images(
 
     # 允許外部傳入 pipe 以避免重複載入
     if pipe is None:
-        pipe = ObjectClearPipeline.from_pretrained_with_custom_modules(
-            "jixin0101/ObjectClear",
-            torch_dtype=torch_dtype,
-            apply_attention_guided_fusion=True,
-            cache_dir=cache_dir,
-            variant=variant,
-        )
-        pipe.to(device)
+        # 如果已經載入了相同設備的模型，直接使用
+        if _global_objectclear_pipe is not None and _global_objectclear_device == device:
+            pipe = _global_objectclear_pipe
+        else:
+            pipe = ObjectClearPipeline.from_pretrained_with_custom_modules(
+                "jixin0101/ObjectClear",
+                torch_dtype=torch_dtype,
+                apply_attention_guided_fusion=True,
+                cache_dir=cache_dir,
+                variant=variant,
+            )
+            pipe.to(device)
+            
+            # 存儲到全局變量
+            _global_objectclear_pipe = pipe
+            _global_objectclear_device = device
 
     image = Image.open(sample_image_path).convert("RGB")
     mask = Image.open(mask_image_path).convert("L")
@@ -76,7 +90,28 @@ def infer_on_two_images(
 
     fused_img_pil = fused_img_pil.resize(image_or.size)
     fused_img_pil.save(output_path)
+    
+    # 推理完成後清理顯存
+    unload_objectclear_model()
+    
     return output_path
+
+
+def unload_objectclear_model():
+    """卸載 ObjectClear 模型以釋放顯存"""
+    global _global_objectclear_pipe, _global_objectclear_device
+    
+    if _global_objectclear_pipe is not None:
+        # 清理模型
+        del _global_objectclear_pipe
+        _global_objectclear_pipe = None
+        _global_objectclear_device = None
+        
+        # 清理顯存
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        print("ObjectClear 模型已卸載")
 
 
 if __name__ == '__main__':

@@ -1465,8 +1465,6 @@ if __name__ == '__main__':
         
         # 在新執行緒中開啟瀏覽器，以免阻塞伺服器啟動
         threading.Thread(target=open_browser, args=(PORT,)).start()
-
-        # 已移除啟動時 Qwen 暖機
         
         # 啟動伺服器
         try:
