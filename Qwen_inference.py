@@ -7,7 +7,7 @@ import json
 from PIL import Image
 
 # 設定 HuggingFace cache 下載目錄 (hf_download) 於當前工作目錄
-cache_dir = os.path.join(os.getcwd(), "hf_download")
+cache_dir = os.path.join(os.getcwd(), "hf_download/hub")
 os.makedirs(cache_dir, exist_ok=True)
 
 # 全域快取：避免每次呼叫都重新載入模型
@@ -87,9 +87,19 @@ def classify_image_edit_task(image: str, user_prompt: str, max_attempts: int = 5
         "0 — The text asks not to change the background and generate or change a \"single\" object that interacts with the original image.\n"
         "2 — Remove one or many objects from the original image, without making other modifications.\n"
         "otherwise, 1.\n"
-        "if the user_prompt asks not to change the background,keeping the background same, or the same meaning, it must be 0, this is the most important rule !!!\n"
+
+        "if the user_prompt asks not to change the background,keeping the background unchanged, or the same meaning, it must be 0, this is the most important rule !!!\n"
+        "All of these words should be 0: Do not alter the background, Do not change the background, Do not modify the background, Maintain the background, Ensure the background remains identical.\n"
+        "If the user_prompt only add one item to the image, it must be 0.\n"
+
         "Strictly output a single number only: 0 or 1 or 2.\n"
-        "example: 0"
+        "example: if the user_prompt is 'remove the cats and dogs from the image', the output should be 2\n"
+        "example: if the user_prompt is 'generate a cat in the image, do not change the background', the output should be 0\n"
+        "example: if the user_prompt is 'the woods in the image on fire, keeping the background same', the output should be 0\n"
+        "example: if the user_prompt is 'generate a pig in the image', the output should be 0\n"
+        "example: if the user_prompt is 'generate some pigs in the image', the output should be 1\n"
+
+        "output 1 means the user_prompt contains many kinds of actions such as Remove, generate, switch item, or add many objects even change the background."
     )
 
     messages = [
@@ -106,7 +116,10 @@ def classify_image_edit_task(image: str, user_prompt: str, max_attempts: int = 5
                     "type": "image",
                     "image": image_source,
                 },
-                {"type": "text", "text": "user_prompt: " + (user_prompt or "")},
+                {
+                    "type": "text", 
+                    "text": "You must strictly follow the system prompt, the user_prompt is: " + (user_prompt or "")
+                },
             ],
         },
     ]

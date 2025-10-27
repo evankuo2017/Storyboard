@@ -115,6 +115,33 @@ def init_models():
     
     return _models
 
+def unload_framepack():
+    """卸載FramePack模型以釋放顯存"""
+    global _models, _high_vram
+    if _models is not None:
+        try:
+            # 將所有模型移回CPU
+            for name, model in _models.items():
+                if hasattr(model, 'to'):
+                    try:
+                        model.to('cpu')
+                        print(f"[FramePack] 已將 {name} 移回 CPU")
+                    except Exception as e:
+                        print(f"[FramePack] {name} 移回 CPU 失敗: {e}")
+            
+            # 清除全局變數
+            _models = None
+            _high_vram = None
+            
+            # 清理CUDA快取
+            torch.cuda.empty_cache()
+            print("[FramePack] 模型已卸載，顯存已釋放")
+            
+        except Exception as e:
+            print(f"[FramePack] 卸載過程中發生錯誤: {e}")
+    else:
+        print("[FramePack] 沒有載入的模型需要卸載")
+
 class ProgressCallback:
     """進度回調類"""
     def __init__(self, external_callback=None):
@@ -468,6 +495,10 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
                         img_out = os.path.join(tempfile.gettempdir(), f'{job_id}_preview.png')
                     img.save(img_out)
                     print(f"預覽模式：在第一個section完成後立即輸出最後一幀到 {img_out}")
+                    
+                    # 單幀生成完成後釋放顯存
+                    unload_framepack()
+                    
                     return img_out
                 except Exception as e:
                     print(f"保存預覽單幀失敗: {e}")
@@ -480,6 +511,10 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
 
             if is_last_section:
                 print(f"視頻生成完成！")
+                
+                # 視頻生成完成後釋放顯存
+                unload_framepack()
+                
                 return output_filename
         
     except Exception as e:
@@ -493,6 +528,12 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
                 )
             except:
                 pass
+        
+        # 異常情況下也嘗試釋放顯存
+        try:
+            unload_framepack()
+        except:
+            pass
         
         return None
 

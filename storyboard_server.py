@@ -20,7 +20,7 @@ import numpy as np
 from PIL import Image
 import torch
 import traceback
-from framepack_start_end import process_video as framepack_process_video
+from framepack_start_end import process_video as framepack_process_video, unload_framepack
 
 # 設置日誌
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -1227,30 +1227,23 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 # 背景執行：依序進行 Qwen 分類與單幀生成
                 def run_job():
                     try:
-                        # 1) Qwen 分類階段：載入 → 推理（延後卸載，若 label==2 還需後續框選）
+                        # 導入必要的模組
+                        try:
+                            from Qwen_inference import get_qwen_model_and_processor, classify_image_edit_task, extract_remove_bounding_boxes, unload_qwen
+                        except Exception:
+                            sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+                            from Qwen_inference import get_qwen_model_and_processor, classify_image_edit_task, extract_remove_bounding_boxes, unload_qwen
+
+                        # Qwen 分類階段
                         task_status[job_id]['message'] = '分類中（Qwen）...'
                         task_status[job_id]['progress'] = 5
-                        qwen_label = None
-                        try:
-                            try:
-                                from Qwen_inference import get_qwen_model_and_processor, classify_image_edit_task, extract_remove_bounding_boxes, unload_qwen
-                            except Exception:
-                                sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-                                from Qwen_inference import get_qwen_model_and_processor, classify_image_edit_task, extract_remove_bounding_boxes, unload_qwen
+                        
+                        get_qwen_model_and_processor()
+                        qwen_label = classify_image_edit_task(prev_image_file, transition_text)
+                        task_status[job_id]['qwen_label'] = int(qwen_label)
+                        logger.info(f"QwenClassification label: {qwen_label}")
 
-                            get_qwen_model_and_processor()
-                            qwen_label = classify_image_edit_task(prev_image_file, transition_text)
-                            task_status[job_id]['qwen_label'] = int(qwen_label)
-                            logger.info(f"QwenClassification label: {qwen_label} (image={prev_image_file}, prompt='{transition_text}')")
-                        except Exception as e:
-                            logger.error(f"呼叫 QwenClassification 失敗: {e}")
-
-                        # 依 Qwen 分類結果選擇路線
-                        try:
-                            label_int = int(qwen_label) if qwen_label is not None else 0
-                        except Exception:
-                            label_int = 0
-
+                        # 準備生成
                         task_status[job_id]['message'] = '開始生成圖片...'
                         task_status[job_id]['progress'] = 10
 
@@ -1260,52 +1253,56 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
 
                         prompt_text = transition_text or ''
 
-                        # 分類後若非 ObjectClear (label!=2)，此時即可卸載 Qwen；
-                        if label_int != 2 and 'unload_qwen' in locals():
+                        # 根據 label 選擇實作
+                        if qwen_label == 1:
+                            logger.info("選擇 Qwen Image Edit")
+                            # 先卸載 Qwen 分類模型，避免顯存衝突
                             try:
                                 unload_qwen()
-                            except Exception as _ue:
-                                logger.warning(f"Qwen 卸載失敗: {_ue}")
-                        # 根據 label 選擇實作；FLUX/ObjectClear 先輸出 placeholder 圖片，保持後處理一致
-                        if label_int == 1:
-                            logger.info("選擇 FLUX 生成")
+                            except Exception as e:
+                                logger.warning(f"Qwen 卸載失敗: {e}")
+                            
                             try:
-                                from reference_flux_kontext import generate_flux_frame
-                            except Exception as _ie:
-                                logger.error(f"載入 FLUX 產生器失敗: {_ie}")
-                                task_status[job_id]['status'] = 'error'
-                                task_status[job_id]['message'] = 'FLUX 模組未安裝或不可用'
-                                return
-                            try:
-                                generate_flux_frame(
-                                    image=prev_image_file,
+                                from Qwen_image_edit import generate_qwen_image_edit, unload_qwen_image_edit
+                                
+                                result_path = generate_qwen_image_edit(
+                                    image_path=prev_image_file,
                                     prompt=prompt_text,
-                                    output=tmp_image_path,
-                                    guidance_scale=2.5,
-                                    precision="bf16",
-                                    local_files_only=False,
+                                    output_path=tmp_image_path,
+                                    negative_prompt="blurry, low quality, distorted",
+                                    num_inference_steps=25,
+                                    seed=torch.randint(0, 2**32, (1,)).item()
                                 )
-                            except Exception as _e:
-                                raise RuntimeError(f"FLUX 生成失敗: {_e}")
-                        elif label_int == 2:
-                            logger.info("選擇 ObjectClear：先解析移除框選，並在當前圖片上疊加框選圖")
-                            boxes_result = {"boxes": []}
+                                
+                                if result_path is None:
+                                    raise RuntimeError("Qwen Image Edit 生成失敗")
+                                    
+                                logger.info("Qwen Image Edit 生成完成")
+                                
+                                # 卸載 Qwen Image Edit 模型
+                                try:
+                                    unload_qwen_image_edit()
+                                except Exception as e:
+                                    logger.warning(f"Qwen Image Edit 卸載失敗: {e}")
+                                
+                            except Exception as e:
+                                logger.error(f"Qwen Image Edit 失敗: {e}")
+                                raise RuntimeError(f"Qwen Image Edit 生成失敗: {e}")
+                                
+                        elif qwen_label == 2:
+                            logger.info("選擇 ObjectClear")
                             try:
-                                # 呼叫 Qwen 的框選抽取
+                                # 呼叫 Qwen 的框選任務
                                 boxes_result = extract_remove_bounding_boxes(prev_image_file, prompt_text) or {"boxes": []}
                                 task_status[job_id]['remove_boxes'] = boxes_result
-                            except Exception as _e:
-                                logger.warning(f"ObjectClear 框選抽取失敗: {_e}")
-                            finally:
-                                # 完成框選後再卸載 Qwen
-                                if 'unload_qwen' in locals():
-                                    try:
-                                        unload_qwen()
-                                    except Exception as _ue:
-                                        logger.warning(f"Qwen 卸載失敗: {_ue}")
                                 
-                            # 使用 SAM 產生精確 mask
-                            try:
+                                # 完成框選後立即卸載 Qwen
+                                try:
+                                    unload_qwen()
+                                except Exception as e:
+                                    logger.warning(f"Qwen 卸載失敗: {e}")
+                                
+                                # 使用 SAM 產生精確 mask
                                 from sam_inference import generate_masks_with_sam
                                 import tempfile
                                 
@@ -1333,153 +1330,95 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                     image_path=prev_image_file,
                                     boxes_json=tmp_json_path,
                                     output_mask_path=tmp_mask_path,
-                                    model_type="vit_h",  # 使用高品質模型
+                                    model_type="vit_h",
                                     device="cuda" if torch.cuda.is_available() else "cpu"
                                 )
                                 
                                 # 使用 ObjectClear 模型完成物件移除
-                                try:
-                                    from inference_objectclear import infer_on_two_images
-                                    
-                                    # 呼叫 ObjectClear 推理
-                                    logger.info("開始 ObjectClear 推理...")
-                                    final_output_path = infer_on_two_images(
-                                        sample_image_path=prev_image_file,
-                                        mask_image_path=mask_path,
-                                        output_path=None,  # 讓函數自動產生路徑
-                                        use_fp16=False,
-                                        steps=20,
-                                        guidance_scale=2.5,
-                                        seed=42,
-                                        device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                                    )
-                                    
-                                    # 將 ObjectClear 的結果複製到最終輸出
-                                    import shutil
-                                    shutil.copy2(final_output_path, tmp_image_path)
-                                    
-                                    # 清理 ObjectClear 的輸出檔案
-                                    try:
-                                        os.unlink(final_output_path)
-                                    except:
-                                        pass
-                                    
-                                    logger.info("ObjectClear 推理完成")
-                                    
-                                except Exception as _oc_e:
-                                    logger.warning(f"ObjectClear 推理失敗，回退到 mask 可視化: {_oc_e}")
-                                    # 回退到 mask 可視化
-                                    from PIL import Image as PILImage, ImageDraw, ImageFont
-                                    base_img = PILImage.open(prev_image_file).convert('RGBA')
-                                    mask_img = PILImage.open(mask_path).convert('L')
-                                    
-                                    # 將 mask 轉為 RGBA 並設為紅色半透明
-                                    mask_rgba = PILImage.new('RGBA', base_img.size, (0, 0, 0, 0))
-                                    mask_array = np.array(mask_img)
-                                    red_overlay = np.zeros((*mask_array.shape, 4), dtype=np.uint8)
-                                    red_overlay[mask_array > 0] = [255, 0, 0, 128]  # 紅色半透明
-                                    mask_rgba = PILImage.fromarray(red_overlay, 'RGBA')
-                                    
-                                    # 合成圖片
-                                    composed = PILImage.alpha_composite(base_img, mask_rgba).convert('RGB')
-                                    composed.save(tmp_image_path)
+                                from inference_objectclear import infer_on_two_images
                                 
-                                # 清理臨時檔案
+                                # 呼叫 ObjectClear 推理
+                                logger.info("開始 ObjectClear 推理...")
+                                final_output_path = infer_on_two_images(
+                                    sample_image_path=prev_image_file,
+                                    mask_image_path=mask_path,
+                                    output_path=None,
+                                    use_fp16=False,
+                                    steps=20,
+                                    guidance_scale=2.5,
+                                    seed=42,
+                                    device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                                )
+                                
+                                # 將 ObjectClear 的結果複製到最終輸出
+                                import shutil
+                                shutil.copy2(final_output_path, tmp_image_path)
+                                
+                                # 清理檔案
                                 try:
+                                    os.unlink(final_output_path)
                                     os.unlink(tmp_json_path)
                                     os.unlink(tmp_mask_path)
                                 except:
                                     pass
                                     
-                                logger.info("SAM mask 生成完成")
+                                logger.info("ObjectClear 推理完成")
                                 
-                            except Exception as _e:
-                                logger.warning(f"SAM 推理失敗，回退到框選可視化: {_e}")
-                                # 回退到原本的框選可視化
-                                try:
-                                    from PIL import Image as PILImage, ImageDraw, ImageFont
-                                    base_img = PILImage.open(prev_image_file).convert('RGBA')
-                                    overlay = PILImage.new('RGBA', base_img.size, (0, 0, 0, 0))
-                                    draw = ImageDraw.Draw(overlay)
-                                    W, H = base_img.size
-                                    boxes = boxes_result.get('boxes', []) if isinstance(boxes_result, dict) else []
-                                    # 使用預設字型
-                                    try:
-                                        font = ImageFont.load_default()
-                                    except Exception:
-                                        font = None
-                                    for item in boxes:
-                                        box = item.get('box_xyxy') if isinstance(item, dict) else None
-                                        label_text = str(item.get('label')) if isinstance(item, dict) and item.get('label') is not None else 'object'
-                                        if isinstance(box, (list, tuple)) and len(box) == 4:
-                                            x0, y0, x1, y1 = [int(v) for v in box]
-                                            # 邊界裁切
-                                            x0 = max(0, min(x0, W))
-                                            x1 = max(0, min(x1, W))
-                                            y0 = max(0, min(y0, H))
-                                            y1 = max(0, min(y1, H))
-                                            if x1 <= x0 or y1 <= y0:
-                                                continue
-                                            # 只畫邊框（不填色；避免重疊時遮蔽其他框）
-                                            draw.rectangle([x0, y0, x1, y1], outline=(255, 0, 0, 255), width=3)
-
-                                            # 繪製標籤背景與文字
-                                            if font is not None and label_text:
-                                                pad = 2
-                                                # 計算文字框大小
-                                                try:
-                                                    tb = draw.textbbox((0, 0), label_text, font=font)
-                                                    text_w = tb[2] - tb[0]
-                                                    text_h = tb[3] - tb[1]
-                                                except Exception:
-                                                    text_w, text_h = draw.textsize(label_text, font=font)
-
-                                                bg_w = text_w + 2 * pad
-                                                bg_h = text_h + 2 * pad
-                                                # 盡量畫在框上方，放不下就畫在框內側
-                                                bg_x0 = x0
-                                                bg_y0 = y0 - bg_h if y0 - bg_h >= 0 else y0
-                                                if bg_x0 + bg_w > W:
-                                                    bg_x0 = max(0, W - bg_w)
-                                                bg_y1 = min(H, bg_y0 + bg_h)
-                                                # 背景（半透明黑）
-                                                draw.rectangle([bg_x0, bg_y0, bg_x0 + bg_w, bg_y1], fill=(0, 0, 0, 160))
-                                                # 文字（白）
-                                                draw.text((bg_x0 + pad, bg_y0 + pad), label_text, font=font, fill=(255, 255, 255, 255))
-
-                                    composed = PILImage.alpha_composite(base_img, overlay).convert('RGB')
-                                    composed.save(tmp_image_path)
-                                except Exception as _e2:
-                                    raise RuntimeError(f"建立 ObjectClear 框選圖失敗: {_e2}")
+                            except Exception as e:
+                                # 任何推理失敗都直接輸出黑色圖片
+                                logger.error(f"ObjectClear 推理失敗: {e}")
+                                print(f"ObjectClear 推理失敗: {e}")
+                                
+                                # 創建黑色圖片
+                                from PIL import Image as PILImage
+                                with Image.open(prev_image_file) as img:
+                                    width, height = img.size
+                                black_img = PILImage.new('RGB', (width, height), (0, 0, 0))
+                                black_img.save(tmp_image_path)
+                                logger.info("已輸出黑色圖片")
+                                
                         else:
                             # FramePack 
+                            # 先卸載 Qwen 分類模型，避免顯存衝突
+                            try:
+                                unload_qwen()
+                            except Exception as e:
+                                logger.warning(f"Qwen 卸載失敗: {e}")
+                                
                             try:
                                 from generate_preview import generate_one_frame
+                                generate_one_frame(prev_image_file, prompt_text, tmp_image_path, progress_cb=progress_cb, cancel_cb=cancel_cb, duration_seconds=duration_seconds)
+                                # FramePack單幀生成完成後釋放顯存
+                                unload_framepack()
+             
                             except Exception as e:
-                                logger.error(f"載入 generate_preview 失敗: {e}")
-                                task_status[job_id]['status'] = 'error'
-                                task_status[job_id]['message'] = '後端未安裝生成模組'
-                                return
-                            generate_one_frame(prev_image_file, prompt_text, tmp_image_path, progress_cb=progress_cb, cancel_cb=cancel_cb, duration_seconds=duration_seconds)
+                                logger.error(f"FramePack 生成失敗: {e}")
+                                raise RuntimeError(f"FramePack 生成失敗: {e}")
 
+                        # 讀取並編碼圖片
                         with open(tmp_image_path, 'rb') as img_file:
                             import base64
                             image_data = base64.b64encode(img_file.read()).decode('utf-8')
+                        
+                        # 清理臨時檔案
                         try:
                             os.unlink(tmp_image_path)
                         except:
                             pass
 
+                        # 檢查取消狀態
                         if preview_cancel_flags.get(job_id, False):
                             task_status[job_id]['status'] = 'cancelled'
                             task_status[job_id]['message'] = '已取消生成'
                             return
 
+                        # 完成任務
                         task_status[job_id]['status'] = 'completed'
                         task_status[job_id]['progress'] = 100
                         task_status[job_id]['message'] = '生成完成。'
                         task_status[job_id]['image_data'] = image_data
                         task_status[job_id]['image_type'] = 'image/png'
+                        
                     except Exception as e:
                         if preview_cancel_flags.get(job_id, False):
                             task_status[job_id]['status'] = 'cancelled'
