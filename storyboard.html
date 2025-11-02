@@ -9,15 +9,15 @@
             --primary-color: #4361ee;
             --secondary-color: #f72585;
             --accent-color: #7209b7;
-            --bg-color: #f8f9fa;
+            --bg-color: #ede7f6;
             --card-bg: #ffffff;
-            --border-color: #e9ecef;
+            --border-color: #d1d5db;
             --text-color: #212529;
             --text-light: #6c757d;
             --success: #2a9d8f;
             --danger: #e63946;
             --warning: #fca311;
-            --shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            --shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
             --radius: 12px;
             --transition: all 0.3s ease;
         }
@@ -32,16 +32,20 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             margin: 0;
             padding: 0;
-            background-color: var(--bg-color);
+            background-image: url('UI_image/images.jpg');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            background-repeat: no-repeat;
             color: var(--text-color);
             line-height: 1.6;
         }
         
         .container {
-            max-width: 1200px;
+            max-width: 1000px;
             margin: 30px auto;
             background-color: var(--card-bg);
-            padding: 30px;
+            padding: 25px;
             border-radius: var(--radius);
             box-shadow: var(--shadow);
         }
@@ -74,7 +78,7 @@
         .timeline-container {
             width: 100%;
             height: 400px;
-            background: #f8f9fa;
+            background: #cfd8dc;
             border-radius: var(--radius);
             position: relative;
             margin: 25px 0;
@@ -153,7 +157,7 @@
             align-items: center;
             margin: 20px 0;
             gap: 15px;
-            background-color: #f8f9fa;
+            background-color: #cfd8dc;
             padding: 15px;
             border-radius: var(--radius);
             box-shadow: var(--shadow);
@@ -192,18 +196,18 @@
         }
         
         button:disabled {
-            background-color: #b8c2cc;
+            background-color: #95A5A6;
             cursor: not-allowed;
             transform: none;
             box-shadow: none;
         }
         
         button.delete {
-            background-color: var(--danger);
+            background-color: #ec407a;
         }
         
         button.delete:hover {
-            background-color: #d62a37;
+            background-color: #d81b60;
         }
         
         .button-primary {
@@ -229,7 +233,7 @@
             flex-wrap: wrap;
             margin-top: 25px;
             gap: 25px;
-            background-color: #f8f9fa;
+            background-color: #cfd8dc;
             padding: 20px;
             border-radius: var(--radius);
             box-shadow: var(--shadow);
@@ -265,6 +269,7 @@
             font-size: 14px;
             transition: var(--transition);
             background-color: white;
+            margin-bottom: 15px;
         }
         
         input:focus, textarea:focus {
@@ -281,7 +286,7 @@
         .table-container {
             margin-top: 30px;
             overflow-x: auto;
-            background-color: #f8f9fa;
+            background-color: #cfd8dc;
             padding: 20px;
             border-radius: var(--radius);
             box-shadow: var(--shadow);
@@ -311,7 +316,7 @@
         }
         
         tr:nth-child(even) {
-            background-color: rgba(0, 0, 0, 0.02);
+            background-color: rgba(96, 125, 139, 0.15);
         }
         
         tr:hover {
@@ -377,7 +382,7 @@
         }
         
         #output-text {
-            background-color: #f8f9fa;
+            background-color: #cfd8dc;
             border: 1px solid var(--border-color);
             padding: 15px;
             font-size: 14px;
@@ -408,7 +413,7 @@
             width: 100%;
             height: 100%;
             object-fit: contain;
-            background: #f8f9fa;
+            background: #cfd8dc;
         }
         
         .node-image-container .drop-message {
@@ -2023,7 +2028,7 @@
                 dialog.style.boxShadow = '0 6px 20px rgba(0,0,0,0.2)';
 
                 const title = document.createElement('div');
-                title.textContent = `選擇動作（節點 ${nodeIndex}）`;
+                title.textContent = `Choose Action (Node ${nodeIndex})`;
                 title.style.fontWeight = '600';
                 title.style.marginBottom = '12px';
                 dialog.appendChild(title);
@@ -2034,87 +2039,50 @@
                 btnRow.style.justifyContent = 'space-between';
 
                 const uploadBtn = document.createElement('button');
-                uploadBtn.textContent = '上傳圖片';
+                uploadBtn.textContent = 'Upload';
                 uploadBtn.className = 'button-primary';
                 uploadBtn.style.flex = '1';
                 uploadBtn.style.fontSize = '13px';
                 uploadBtn.style.padding = '8px 12px';
                 uploadBtn.style.whiteSpace = 'nowrap';
+                uploadBtn.style.background = '#2a9d8f';
+                uploadBtn.style.border = 'none';
+                uploadBtn.style.color = 'white';
+                uploadBtn.onmouseover = () => { uploadBtn.style.background = '#238579'; };
+                uploadBtn.onmouseout = () => { uploadBtn.style.background = '#2a9d8f'; };
                 uploadBtn.onclick = () => {
                     imageUploadEl.click();
                     document.body.removeChild(overlay);
                 };
 
                 const genBtn = document.createElement('button');
-                genBtn.textContent = '生成圖片';
+                genBtn.textContent = 'Generate';
                 genBtn.style.flex = '1';
                 genBtn.style.fontSize = '13px';
                 genBtn.style.padding = '8px 12px';
                 genBtn.style.whiteSpace = 'nowrap';
+                genBtn.style.background = '#4361ee';
+                genBtn.style.border = 'none';
+                genBtn.style.color = 'white';
+                genBtn.onmouseover = () => { genBtn.style.background = '#3a56d4'; };
+                genBtn.onmouseout = () => { genBtn.style.background = '#4361ee'; };
                 genBtn.onclick = () => {
-                    const prevIndex = Math.max(0, nodeIndex - 1);
-                    const prevNode = state.nodes[prevIndex];
-                    const transitionText = state.nodes[prevIndex]?.transitionText || '';
-                    const confirmMsg = `將根據前一個節點(索引 ${prevIndex})的圖片與當前節點的描述(prompt)隨機生成最後幀。\n\n是否繼續?`;
-                    const ok = window.confirm(confirmMsg);
-                    if (!ok) return;
-
-                    // 準備前一張圖片資料
-                    let prevImagePayload = {};
-                    if (prevNode && prevNode.hasImage && prevNode.imageUrl) {
-                        if (prevNode.imageUrl.startsWith('data:')) {
-                            const parts = prevNode.imageUrl.split(',');
-                            if (parts.length === 2) {
-                                prevImagePayload.prev_image_data = parts[1];
-                                prevImagePayload.prev_image_type = prevNode.imageUrl.split(';')[0].split(':')[1] || 'image/png';
-                            }
-                        }
-                    }
-
-                    // 計算兩節點時間差，作為影片長度（秒）
-                    const currNode = state.nodes[nodeIndex];
-                    const durationSeconds = Number(currNode.time) - Number(prevNode.time);
-
-                    fetch('/generate_node_image', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            node_index: nodeIndex,
-                            prev_node_index: prevIndex,
-                            has_prev_image: !!(prevNode && prevNode.hasImage),
-                            transition_text: transitionText,
-                            duration_seconds: durationSeconds,
-                            ...prevImagePayload
-                        })
-                    })
-                    .then(r => r.json())
-                    .then(data => {
-                        if (data.status === 'queued' && data.job_id) {
-                            // 顯示進度對話框
-                            showPreviewProgressDialog(data.job_id, nodeIndex);
-                        } else {
-                            if (statusMessageEl) statusMessageEl.textContent = data.message || '生成請求失敗';
-                        }
-                    })
-                    .catch(err => {
-                        console.error('Generate image request error:', err);
-                        if (statusMessageEl) {
-                            statusMessageEl.textContent = `生成請求失敗: ${err.message}`;
-                        }
-                    })
-                    .finally(() => {
-                        if (overlay && overlay.parentNode === document.body) {
-                            document.body.removeChild(overlay);
-                        }
-                    });
+                    // 關閉當前對話框，顯示生成圖片配置對話框
+                    document.body.removeChild(overlay);
+                    showGenerateImageDialog(nodeIndex);
                 };
 
                 const cancelBtn = document.createElement('button');
-                cancelBtn.textContent = '取消';
+                cancelBtn.textContent = 'Cancel';
                 cancelBtn.style.flex = '1';
                 cancelBtn.style.fontSize = '13px';
                 cancelBtn.style.padding = '8px 12px';
                 cancelBtn.style.whiteSpace = 'nowrap';
+                cancelBtn.style.background = '#95A5A6';
+                cancelBtn.style.border = 'none';
+                cancelBtn.style.color = 'white';
+                cancelBtn.onmouseover = () => { cancelBtn.style.background = '#7F8C8D'; };
+                cancelBtn.onmouseout = () => { cancelBtn.style.background = '#95A5A6'; };
                 cancelBtn.onclick = () => {
                     document.body.removeChild(overlay);
                 };
@@ -2286,6 +2254,369 @@
 
                 // 關閉時清理輪詢
                 // 禁止點擊遮罩直接關閉（僅允許按鈕關閉/取消）
+            }
+
+            // 顯示生成圖片配置對話框
+            function showGenerateImageDialog(nodeIndex) {
+                console.log(`[showGenerateImageDialog] 開始顯示配置對話框，節點: ${nodeIndex}`);
+                const prevIndex = Math.max(0, nodeIndex - 1);
+                const prevNode = state.nodes[prevIndex];
+                const currNode = state.nodes[nodeIndex];
+                // Prompt 默認為空，等待使用者輸入
+                const defaultPrompt = '';
+                
+                // 建立遮罩
+                const overlay = document.createElement('div');
+                overlay.style.position = 'fixed';
+                overlay.style.top = '0';
+                overlay.style.left = '0';
+                overlay.style.width = '100%';
+                overlay.style.height = '100%';
+                overlay.style.background = 'rgba(0,0,0,0.5)';
+                overlay.style.zIndex = '10000';
+                overlay.style.display = 'flex';
+                overlay.style.alignItems = 'center';
+                overlay.style.justifyContent = 'center';
+                
+                // 建立對話框
+                const dialog = document.createElement('div');
+                dialog.style.background = '#fff';
+                dialog.style.padding = '24px';
+                dialog.style.borderRadius = '12px';
+                dialog.style.minWidth = '480px';
+                dialog.style.maxWidth = '600px';
+                dialog.style.maxHeight = '80vh';
+                dialog.style.overflow = 'auto';
+                dialog.style.boxShadow = '0 6px 20px rgba(0,0,0,0.2)';
+                
+                const title = document.createElement('div');
+                title.textContent = `Image Generation Config (Node ${nodeIndex})`;
+                title.style.fontWeight = '600';
+                title.style.fontSize = '18px';
+                title.style.marginBottom = '20px';
+                title.style.color = '#4361ee';
+                dialog.appendChild(title);
+                
+                // 參考圖片區域
+                const refImageSection = document.createElement('div');
+                refImageSection.style.marginBottom = '20px';
+                
+                const refImageLabel = document.createElement('label');
+                refImageLabel.textContent = 'Reference Image:';
+                refImageLabel.style.display = 'block';
+                refImageLabel.style.fontWeight = '600';
+                refImageLabel.style.marginBottom = '8px';
+                refImageSection.appendChild(refImageLabel);
+                
+                const refImageContainer = document.createElement('div');
+                refImageContainer.style.width = '100%';
+                refImageContainer.style.minHeight = '200px';
+                refImageContainer.style.border = '2px dashed var(--border-color)';
+                refImageContainer.style.borderRadius = '8px';
+                refImageContainer.style.display = 'flex';
+                refImageContainer.style.alignItems = 'center';
+                refImageContainer.style.justifyContent = 'center';
+                refImageContainer.style.background = '#f8f9fa';
+                refImageContainer.style.position = 'relative';
+                refImageContainer.style.overflow = 'hidden';
+                
+                // 儲存參考圖片的數據
+                let referenceImageData = null;
+                let referenceImageType = null;
+                
+                // 創建上傳圖片的處理函數
+                const handleImageUpload = () => {
+                    const tempInput = document.createElement('input');
+                    tempInput.type = 'file';
+                    tempInput.accept = 'image/*';
+                    tempInput.onchange = (e) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (e) => {
+                                // 清除舊內容
+                                refImageContainer.innerHTML = '';
+                                
+                                // 顯示新圖片
+                                const newImg = document.createElement('img');
+                                newImg.src = e.target.result;
+                                newImg.style.maxWidth = '100%';
+                                newImg.style.maxHeight = '200px';
+                                newImg.style.objectFit = 'contain';
+                                refImageContainer.appendChild(newImg);
+                                
+                                // 重新添加提示標籤
+                                const newInfoLabel = document.createElement('div');
+                                newInfoLabel.textContent = 'Click to change image';
+                                newInfoLabel.style.position = 'absolute';
+                                newInfoLabel.style.bottom = '8px';
+                                newInfoLabel.style.left = '8px';
+                                newInfoLabel.style.right = '8px';
+                                newInfoLabel.style.background = 'rgba(0,0,0,0.7)';
+                                newInfoLabel.style.color = 'white';
+                                newInfoLabel.style.padding = '4px 8px';
+                                newInfoLabel.style.borderRadius = '4px';
+                                newInfoLabel.style.fontSize = '11px';
+                                newInfoLabel.style.textAlign = 'center';
+                                refImageContainer.appendChild(newInfoLabel);
+                                
+                                // 保存圖片數據
+                                const dataUrl = e.target.result;
+                                const parts = dataUrl.split(',');
+                                if (parts.length === 2) {
+                                    referenceImageData = parts[1];
+                                    referenceImageType = dataUrl.split(';')[0].split(':')[1] || 'image/png';
+                                }
+                            };
+                            reader.readAsDataURL(file);
+                        }
+                    };
+                    tempInput.click();
+                };
+                
+                // 如果有前一個節點的圖片，顯示它
+                if (prevNode && prevNode.hasImage && prevNode.imageUrl) {
+                    const refImg = document.createElement('img');
+                    refImg.src = prevNode.imageUrl;
+                    refImg.style.maxWidth = '100%';
+                    refImg.style.maxHeight = '200px';
+                    refImg.style.objectFit = 'contain';
+                    refImageContainer.appendChild(refImg);
+                    
+                    // 保存參考圖片數據
+                    if (prevNode.imageUrl.startsWith('data:')) {
+                        const parts = prevNode.imageUrl.split(',');
+                        if (parts.length === 2) {
+                            referenceImageData = parts[1];
+                            referenceImageType = prevNode.imageUrl.split(';')[0].split(':')[1] || 'image/png';
+                        }
+                    }
+                    
+                    const infoLabel = document.createElement('div');
+                    infoLabel.textContent = 'Click to change image';
+                    infoLabel.style.position = 'absolute';
+                    infoLabel.style.bottom = '8px';
+                    infoLabel.style.left = '8px';
+                    infoLabel.style.right = '8px';
+                    infoLabel.style.background = 'rgba(0,0,0,0.7)';
+                    infoLabel.style.color = 'white';
+                    infoLabel.style.padding = '4px 8px';
+                    infoLabel.style.borderRadius = '4px';
+                    infoLabel.style.fontSize = '11px';
+                    infoLabel.style.textAlign = 'center';
+                    refImageContainer.appendChild(infoLabel);
+                    
+                    // 設置整個容器可點擊來更換圖片
+                    refImageContainer.style.cursor = 'pointer';
+                    refImageContainer.onclick = handleImageUpload;
+                } else {
+                    // 如果沒有前一個節點的圖片，顯示上傳區域
+                    const uploadArea = document.createElement('div');
+                    uploadArea.style.textAlign = 'center';
+                    uploadArea.style.padding = '20px';
+                    
+                    const uploadIcon = document.createElement('div');
+                    uploadIcon.textContent = '📷';
+                    uploadIcon.style.fontSize = '48px';
+                    uploadIcon.style.marginBottom = '10px';
+                    uploadArea.appendChild(uploadIcon);
+                    
+                    const uploadText = document.createElement('div');
+                    uploadText.textContent = 'Click to upload reference image';
+                    uploadText.style.color = 'var(--text-light)';
+                    uploadText.style.fontSize = '14px';
+                    uploadArea.appendChild(uploadText);
+                    
+                    refImageContainer.appendChild(uploadArea);
+                    
+                    // 設置整個容器可點擊來上傳圖片
+                    refImageContainer.style.cursor = 'pointer';
+                    refImageContainer.onclick = handleImageUpload;
+                    
+                    // 添加拖放功能
+                    refImageContainer.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        refImageContainer.style.borderColor = 'var(--primary-color)';
+                        refImageContainer.style.background = 'rgba(67, 97, 238, 0.05)';
+                    });
+                    
+                    refImageContainer.addEventListener('dragleave', () => {
+                        refImageContainer.style.borderColor = 'var(--border-color)';
+                        refImageContainer.style.background = '#f8f9fa';
+                    });
+                    
+                    refImageContainer.addEventListener('drop', (e) => {
+                        e.preventDefault();
+                        refImageContainer.style.borderColor = 'var(--border-color)';
+                        refImageContainer.style.background = '#f8f9fa';
+                        
+                        const file = e.dataTransfer.files[0];
+                        if (file && file.type.startsWith('image/')) {
+                            const reader = new FileReader();
+                            reader.onload = (e) => {
+                                refImageContainer.innerHTML = '';
+                                const newImg = document.createElement('img');
+                                newImg.src = e.target.result;
+                                newImg.style.maxWidth = '100%';
+                                newImg.style.maxHeight = '200px';
+                                newImg.style.objectFit = 'contain';
+                                refImageContainer.appendChild(newImg);
+                                
+                                // 重新添加提示標籤和點擊事件
+                                const newInfoLabel = document.createElement('div');
+                                newInfoLabel.textContent = 'Click to change image';
+                                newInfoLabel.style.position = 'absolute';
+                                newInfoLabel.style.bottom = '8px';
+                                newInfoLabel.style.left = '8px';
+                                newInfoLabel.style.right = '8px';
+                                newInfoLabel.style.background = 'rgba(0,0,0,0.7)';
+                                newInfoLabel.style.color = 'white';
+                                newInfoLabel.style.padding = '4px 8px';
+                                newInfoLabel.style.borderRadius = '4px';
+                                newInfoLabel.style.fontSize = '11px';
+                                newInfoLabel.style.textAlign = 'center';
+                                refImageContainer.appendChild(newInfoLabel);
+                                
+                                refImageContainer.style.cursor = 'pointer';
+                                refImageContainer.onclick = handleImageUpload;
+                                
+                                const dataUrl = e.target.result;
+                                const parts = dataUrl.split(',');
+                                if (parts.length === 2) {
+                                    referenceImageData = parts[1];
+                                    referenceImageType = dataUrl.split(';')[0].split(':')[1] || 'image/png';
+                                }
+                            };
+                            reader.readAsDataURL(file);
+                        }
+                    });
+                }
+                
+                refImageSection.appendChild(refImageContainer);
+                dialog.appendChild(refImageSection);
+                
+                // Prompt 輸入區域
+                const promptSection = document.createElement('div');
+                promptSection.style.marginBottom = '20px';
+                
+                const promptLabel = document.createElement('label');
+                promptLabel.textContent = 'Prompt (Generation Description):';
+                promptLabel.style.display = 'block';
+                promptLabel.style.fontWeight = '600';
+                promptLabel.style.marginBottom = '8px';
+                promptSection.appendChild(promptLabel);
+                
+                const promptTextarea = document.createElement('textarea');
+                promptTextarea.value = defaultPrompt;
+                promptTextarea.placeholder = 'Enter generation description...';
+                promptTextarea.style.width = '100%';
+                promptTextarea.style.minHeight = '80px';
+                promptTextarea.style.padding = '10px';
+                promptTextarea.style.border = '1px solid var(--border-color)';
+                promptTextarea.style.borderRadius = '6px';
+                promptTextarea.style.fontFamily = 'inherit';
+                promptTextarea.style.fontSize = '14px';
+                promptTextarea.style.resize = 'vertical';
+                promptSection.appendChild(promptTextarea);
+                dialog.appendChild(promptSection);
+                
+                // 按鈕區域
+                const btnRow = document.createElement('div');
+                btnRow.style.display = 'flex';
+                btnRow.style.gap = '10px';
+                btnRow.style.justifyContent = 'flex-end';
+                
+                const cancelBtn = document.createElement('button');
+                cancelBtn.textContent = 'Cancel';
+                cancelBtn.style.padding = '10px 20px';
+                cancelBtn.style.background = '#95A5A6';
+                cancelBtn.style.border = 'none';
+                cancelBtn.style.borderRadius = '6px';
+                cancelBtn.style.color = 'white';
+                cancelBtn.style.cursor = 'pointer';
+                cancelBtn.style.fontSize = '14px';
+                cancelBtn.onmouseover = () => { cancelBtn.style.background = '#7F8C8D'; };
+                cancelBtn.onmouseout = () => { cancelBtn.style.background = '#95A5A6'; };
+                cancelBtn.onclick = () => {
+                    document.body.removeChild(overlay);
+                };
+                
+                const confirmBtn = document.createElement('button');
+                confirmBtn.textContent = 'Start Generation';
+                confirmBtn.className = 'button-primary';
+                confirmBtn.style.padding = '10px 20px';
+                confirmBtn.style.background = '#4361ee';
+                confirmBtn.style.border = 'none';
+                confirmBtn.style.borderRadius = '6px';
+                confirmBtn.style.color = 'white';
+                confirmBtn.style.cursor = 'pointer';
+                confirmBtn.style.fontSize = '14px';
+                confirmBtn.onmouseover = () => { confirmBtn.style.background = '#3a56d4'; };
+                confirmBtn.onmouseout = () => { confirmBtn.style.background = '#4361ee'; };
+                confirmBtn.onclick = () => {
+                    const userPrompt = promptTextarea.value.trim();
+                    
+                    if (!userPrompt) {
+                        alert('Please enter a prompt description');
+                        return;
+                    }
+                    
+                    // 檢查是否有參考圖片
+                    if (!referenceImageData) {
+                        alert('Please provide a reference image');
+                        return;
+                    }
+                    
+                    // 計算兩節點時間差
+                    const durationSeconds = Number(currNode.time) - Number(prevNode ? prevNode.time : 0);
+                    
+                    // 關閉配置對話框
+                    document.body.removeChild(overlay);
+                    
+                    // 發送生成請求
+                    fetch('/generate_node_image', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            node_index: nodeIndex,
+                            prev_node_index: prevIndex,
+                            user_prompt: userPrompt,  // 使用用戶輸入的 prompt
+                            reference_image_data: referenceImageData,
+                            reference_image_type: referenceImageType,
+                            duration_seconds: durationSeconds
+                        })
+                    })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.status === 'queued' && data.job_id) {
+                            // 顯示進度對話框
+                            showPreviewProgressDialog(data.job_id, nodeIndex);
+                        } else {
+                            if (statusMessageEl) statusMessageEl.textContent = data.message || '生成請求失敗';
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Generate image request error:', err);
+                        if (statusMessageEl) {
+                            statusMessageEl.textContent = `生成請求失敗: ${err.message}`;
+                        }
+                    });
+                };
+                
+                btnRow.appendChild(cancelBtn);
+                btnRow.appendChild(confirmBtn);
+                dialog.appendChild(btnRow);
+                
+                overlay.appendChild(dialog);
+                
+                // 點擊背景關閉
+                overlay.onclick = (e) => {
+                    if (e.target === overlay) {
+                        document.body.removeChild(overlay);
+                    }
+                };
+                
+                document.body.appendChild(overlay);
             }
 
             // 其他必要的輔助函數

@@ -22,4 +22,6 @@ protobuf==4.25.3
 
 segment-anything==1.0
 
-torchao==0.14.1
+torchao==0.14.1  #降低Qwen-Image-Edit精度用的
+
+gdown==5.2.0

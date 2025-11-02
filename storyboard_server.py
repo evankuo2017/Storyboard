@@ -1152,7 +1152,7 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 })
                 self.wfile.write(response.encode('utf-8'))
         
-        # 新增：處理生成節點圖片的請求（僅打印訊息）
+        # 新增：處理生成節點圖片的請求
         elif self.path == '/generate_node_image':
             try:
                 content_length = int(self.headers.get('Content-Length', '0'))
@@ -1160,42 +1160,60 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 payload = json.loads(post_data.decode('utf-8') or '{}')
                 node_index = payload.get('node_index')
                 prev_node_index = payload.get('prev_node_index')
-                has_prev_image = payload.get('has_prev_image')
-                transition_text = payload.get('transition_text', '')
+                user_prompt = payload.get('user_prompt', '')  # 用戶輸入的 prompt
+                reference_image_data = payload.get('reference_image_data')  # 參考圖片 base64 數據
+                reference_image_type = payload.get('reference_image_type', 'image/png')  # 參考圖片類型
                 duration_seconds = float(payload.get('duration_seconds', 1.0))
-                # Debug: 印出時間差到 console
-                logger.info(f"[Generate] duration_seconds={duration_seconds}")
+                
+                logger.info(f"[Generate] 節點 {node_index}, prompt: {user_prompt[:50]}..., duration: {duration_seconds}s")
 
-                # 驗證：需要有前一張圖片
-                if not has_prev_image:
+                # 驗證：需要有參考圖片
+                if not reference_image_data:
                     self.send_response(400)
                     self.send_header('Content-type', 'application/json')
                     self.send_header('Access-Control-Allow-Origin', '*')
                     self.end_headers()
-                    resp = json.dumps({'status': 'error', 'message': '前一節點沒有圖片，無法生成。'})
+                    resp = json.dumps({'status': 'error', 'message': '請提供參考圖片（前一個節點的圖片或上傳的圖片）'})
                     self.wfile.write(resp.encode('utf-8'))
                     return
 
-                # 解析前一張圖片：使用 base64 數據
-                prev_image_file = None
-                try:
-                    if payload.get('prev_image_data') and payload.get('prev_image_type'):
-                        # base64 儲存成暫存檔
-                        import tempfile
-                        fname = f"prev_tmp_{int(time.time())}.png"
-                        candidate = os.path.join(tempfile.gettempdir(), fname)
-                        with open(candidate, 'wb') as f:
-                            f.write(base64.b64decode(payload['prev_image_data']))
-                        prev_image_file = candidate
-                except Exception as e:
-                    logger.error(f"解析前一張圖片失敗: {e}")
-
-                if not prev_image_file or not os.path.exists(prev_image_file):
+                # 驗證：需要有 prompt
+                if not user_prompt or not user_prompt.strip():
                     self.send_response(400)
                     self.send_header('Content-type', 'application/json')
                     self.send_header('Access-Control-Allow-Origin', '*')
                     self.end_headers()
-                    resp = json.dumps({'status': 'error', 'message': '找不到或無法保存前一張圖片。'})
+                    resp = json.dumps({'status': 'error', 'message': '請輸入 Prompt 描述'})
+                    self.wfile.write(resp.encode('utf-8'))
+                    return
+
+                # 解析參考圖片：使用 base64 數據
+                reference_image_file = None
+                try:
+                    # base64 儲存成暫存檔
+                    import tempfile
+                    fname = f"ref_tmp_{int(time.time())}_{uuid.uuid4().hex[:8]}.png"
+                    candidate = os.path.join(tempfile.gettempdir(), fname)
+                    with open(candidate, 'wb') as f:
+                        f.write(base64.b64decode(reference_image_data))
+                    reference_image_file = candidate
+                    logger.info(f"[Generate] 參考圖片已保存到臨時文件: {reference_image_file}")
+                except Exception as e:
+                    logger.error(f"解析參考圖片失敗: {e}")
+                    self.send_response(400)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    resp = json.dumps({'status': 'error', 'message': f'無法保存參考圖片: {str(e)}'})
+                    self.wfile.write(resp.encode('utf-8'))
+                    return
+
+                if not reference_image_file or not os.path.exists(reference_image_file):
+                    self.send_response(400)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    resp = json.dumps({'status': 'error', 'message': '找不到或無法保存參考圖片。'})
                     self.wfile.write(resp.encode('utf-8'))
                     return
 
@@ -1234,14 +1252,14 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                             sys.path.append(os.path.dirname(os.path.abspath(__file__)))
                             from Qwen_inference import get_qwen_model_and_processor, classify_image_edit_task, extract_remove_bounding_boxes, unload_qwen
 
-                        # Qwen 分類階段
+                        # Qwen 分類階段（使用用戶輸入的 prompt）
                         task_status[job_id]['message'] = '分類中（Qwen）...'
                         task_status[job_id]['progress'] = 5
                         
                         get_qwen_model_and_processor()
-                        qwen_label = classify_image_edit_task(prev_image_file, transition_text)
+                        qwen_label = classify_image_edit_task(reference_image_file, user_prompt)
                         task_status[job_id]['qwen_label'] = int(qwen_label)
-                        logger.info(f"QwenClassification label: {qwen_label}")
+                        logger.info(f"QwenClassification label: {qwen_label}, prompt: {user_prompt[:50]}...")
 
                         # 準備生成
                         task_status[job_id]['message'] = '開始生成圖片...'
@@ -1250,8 +1268,6 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                         import tempfile
                         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
                             tmp_image_path = tmp_file.name
-
-                        prompt_text = transition_text or ''
 
                         # 根據 label 選擇實作
                         if qwen_label == 1:
@@ -1266,8 +1282,8 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                 from Qwen_image_edit import generate_qwen_image_edit, unload_qwen_image_edit
                                 
                                 result_path = generate_qwen_image_edit(
-                                    image_path=prev_image_file,
-                                    prompt=prompt_text,
+                                    image_path=reference_image_file,
+                                    prompt=user_prompt,  # 使用用戶輸入的 prompt
                                     output_path=tmp_image_path,
                                     negative_prompt="blurry, low quality, distorted",
                                     num_inference_steps=25,
@@ -1292,8 +1308,8 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                         elif qwen_label == 2:
                             logger.info("選擇 ObjectClear")
                             try:
-                                # 呼叫 Qwen 的框選任務
-                                boxes_result = extract_remove_bounding_boxes(prev_image_file, prompt_text) or {"boxes": []}
+                                # 呼叫 Qwen 的框選任務（使用用戶輸入的 prompt）
+                                boxes_result = extract_remove_bounding_boxes(reference_image_file, user_prompt) or {"boxes": []}
                                 task_status[job_id]['remove_boxes'] = boxes_result
                                 
                                 # 完成框選後立即卸載 Qwen
@@ -1302,37 +1318,31 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                 except Exception as e:
                                     logger.warning(f"Qwen 卸載失敗: {e}")
                                 
-                                # 使用 SAM 產生精確 mask
-                                from sam_inference import generate_masks_with_sam
+                                # 使用 DIS-SAM 產生精確 mask（兩階段：SAM + IS-Net 精煉）
+                                from dis_sam_inference import generate_masks_with_dis_sam, unload_dis_sam_model
                                 import tempfile
-                                
-                                # 準備 SAM 輸入的 JSON 格式
-                                with Image.open(prev_image_file) as img:
-                                    img_width, img_height = img.size
-                                
-                                sam_input = {
-                                    "image_size": [img_width, img_height],
-                                    "format": "SAM_xyxy_pixel",
-                                    "boxes": boxes_result.get('boxes', [])
-                                }
-                                
-                                # 建立臨時檔案
-                                with tempfile.NamedTemporaryFile(suffix='.json', delete=False, mode='w') as tmp_json:
-                                    json.dump(sam_input, tmp_json, ensure_ascii=False)
-                                    tmp_json_path = tmp_json.name
                                 
                                 with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_mask:
                                     tmp_mask_path = tmp_mask.name
                                 
-                                # 呼叫 SAM 推理
-                                logger.info("開始 SAM 推理...")
-                                mask_path = generate_masks_with_sam(
-                                    image_path=prev_image_file,
-                                    boxes_json=tmp_json_path,
+                                # 呼叫 DIS-SAM 推理（直接傳入 boxes_result dict，DIS-SAM 會自動處理）
+                                logger.info("開始 DIS-SAM 推理（SAM + IS-Net 精煉，使用用戶 prompt）...")
+                                mask_path = generate_masks_with_dis_sam(
+                                    image_path=reference_image_file,
+                                    boxes_json=boxes_result,  # 直接傳入 dict，DIS-SAM 接受這種格式
                                     output_mask_path=tmp_mask_path,
-                                    model_type="vit_h",
-                                    device="cuda" if torch.cuda.is_available() else "cpu"
+                                    sam_model_type="vit_l",  # 使用 vit_l（更快）或 vit_h（更準確）
+                                    device="cuda" if torch.cuda.is_available() else "cpu",
+                                    use_refinement=True,  # 使用 IS-Net 精煉（完整 DIS-SAM）
+                                    auto_download=True
                                 )
+                                
+                                # 完成 DIS-SAM 推理後卸載模型以釋放顯存
+                                try:
+                                    unload_dis_sam_model()
+                                    logger.info("DIS-SAM 模型已卸載")
+                                except Exception as e:
+                                    logger.warning(f"DIS-SAM 模型卸載失敗: {e}")
                                 
                                 # 使用 ObjectClear 模型完成物件移除
                                 from inference_objectclear import infer_on_two_images
@@ -1340,7 +1350,7 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                 # 呼叫 ObjectClear 推理
                                 logger.info("開始 ObjectClear 推理...")
                                 final_output_path = infer_on_two_images(
-                                    sample_image_path=prev_image_file,
+                                    sample_image_path=reference_image_file,
                                     mask_image_path=mask_path,
                                     output_path=None,
                                     use_fp16=False,
@@ -1357,7 +1367,6 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                 # 清理檔案
                                 try:
                                     os.unlink(final_output_path)
-                                    os.unlink(tmp_json_path)
                                     os.unlink(tmp_mask_path)
                                 except:
                                     pass
@@ -1369,9 +1378,17 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                 logger.error(f"ObjectClear 推理失敗: {e}")
                                 print(f"ObjectClear 推理失敗: {e}")
                                 
-                                # 創建黑色圖片
+                                # 確保在錯誤時也卸載 DIS-SAM 模型
+                                try:
+                                    from dis_sam_inference import unload_dis_sam_model
+                                    unload_dis_sam_model()
+                                    logger.info("DIS-SAM 模型已卸載（錯誤處理）")
+                                except Exception as unload_error:
+                                    logger.warning(f"DIS-SAM 模型卸載失敗: {unload_error}")
+                                
+                                # 創建黑色圖片（使用參考圖片的尺寸）
                                 from PIL import Image as PILImage
-                                with Image.open(prev_image_file) as img:
+                                with Image.open(reference_image_file) as img:
                                     width, height = img.size
                                 black_img = PILImage.new('RGB', (width, height), (0, 0, 0))
                                 black_img.save(tmp_image_path)
@@ -1384,10 +1401,10 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                 unload_qwen()
                             except Exception as e:
                                 logger.warning(f"Qwen 卸載失敗: {e}")
-                                
+                            
                             try:
                                 from generate_preview import generate_one_frame
-                                generate_one_frame(prev_image_file, prompt_text, tmp_image_path, progress_cb=progress_cb, cancel_cb=cancel_cb, duration_seconds=duration_seconds)
+                                generate_one_frame(reference_image_file, user_prompt, tmp_image_path, progress_cb=progress_cb, cancel_cb=cancel_cb, duration_seconds=duration_seconds)
                                 # FramePack單幀生成完成後釋放顯存
                                 unload_framepack()
              
@@ -1400,11 +1417,14 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                             import base64
                             image_data = base64.b64encode(img_file.read()).decode('utf-8')
                         
-                        # 清理臨時檔案
+                        # 清理臨時檔案（包括參考圖片）
                         try:
                             os.unlink(tmp_image_path)
-                        except:
-                            pass
+                            if reference_image_file and os.path.exists(reference_image_file):
+                                os.unlink(reference_image_file)
+                                logger.info(f"[Generate] 已清理參考圖片臨時文件: {reference_image_file}")
+                        except Exception as cleanup_error:
+                            logger.warning(f"[Generate] 清理臨時文件失敗: {cleanup_error}")
 
                         # 檢查取消狀態
                         if preview_cancel_flags.get(job_id, False):
