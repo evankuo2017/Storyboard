@@ -1341,7 +1341,7 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                     image_path=reference_image_file,
                                     boxes_json=boxes_result,  # 直接傳入 dict，DIS-SAM 接受這種格式
                                     output_mask_path=tmp_mask_path,
-                                    sam_model_type="vit_l",  # 使用 vit_l（更快）或 vit_h（更準確）
+                                    sam_model_type="vit_h",  # 使用 vit_l（更快）或 vit_h（更準確）
                                     device="cuda" if torch.cuda.is_available() else "cpu",
                                     use_refinement=True,  # 使用 IS-Net 精煉（完整 DIS-SAM）
                                     auto_download=True
