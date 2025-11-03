@@ -2520,6 +2520,32 @@
                 promptSection.appendChild(promptTextarea);
                 dialog.appendChild(promptSection);
                 
+                // Native Prompt 輸入區域
+                const nativePromptSection = document.createElement('div');
+                nativePromptSection.style.marginBottom = '20px';
+                
+                const nativePromptLabel = document.createElement('label');
+                nativePromptLabel.textContent = 'Native Prompt (Optional):';
+                nativePromptLabel.style.display = 'block';
+                nativePromptLabel.style.fontWeight = '600';
+                nativePromptLabel.style.marginBottom = '8px';
+                nativePromptLabel.style.color = 'var(--text-light)';
+                nativePromptSection.appendChild(nativePromptLabel);
+                
+                const nativePromptTextarea = document.createElement('textarea');
+                nativePromptTextarea.value = '';
+                nativePromptTextarea.placeholder = 'Enter native prompt for model (optional)...';
+                nativePromptTextarea.style.width = '100%';
+                nativePromptTextarea.style.minHeight = '60px';
+                nativePromptTextarea.style.padding = '10px';
+                nativePromptTextarea.style.border = '1px solid var(--border-color)';
+                nativePromptTextarea.style.borderRadius = '6px';
+                nativePromptTextarea.style.fontFamily = 'inherit';
+                nativePromptTextarea.style.fontSize = '14px';
+                nativePromptTextarea.style.resize = 'vertical';
+                nativePromptSection.appendChild(nativePromptTextarea);
+                dialog.appendChild(nativePromptSection);
+                
                 // 按鈕區域
                 const btnRow = document.createElement('div');
                 btnRow.style.display = 'flex';
@@ -2555,6 +2581,7 @@
                 confirmBtn.onmouseout = () => { confirmBtn.style.background = '#4361ee'; };
                 confirmBtn.onclick = () => {
                     const userPrompt = promptTextarea.value.trim();
+                    const nativePrompt = nativePromptTextarea.value.trim();
                     
                     if (!userPrompt) {
                         alert('Please enter a prompt description');
@@ -2581,6 +2608,7 @@
                             node_index: nodeIndex,
                             prev_node_index: prevIndex,
                             user_prompt: userPrompt,  // 使用用戶輸入的 prompt
+                            native_prompt: nativePrompt,  // Native prompt for models
                             reference_image_data: referenceImageData,
                             reference_image_type: referenceImageType,
                             duration_seconds: durationSeconds

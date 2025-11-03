@@ -59,12 +59,14 @@ def generate_one_frame(
     progress_cb: Optional[Callable[[int, str], None]] = None,
     cancel_cb: Optional[Callable[[], bool]] = None,
     duration_seconds: float = 1.0,
+    negative_prompt: Optional[str] = None,
 ) -> None:
     """
     以 demo_gradio/framepack 的方式，從前一張圖與 prompt 生成短片，然後抽取單幀圖片輸出。
     - prev_image_path: 前一張圖片的本地路徑（必填）
-    - prompt: 可為空字串
+    - prompt: 用戶描述（用於分類等），可為空字串
     - out_image_path: 輸出圖片路徑（.png）
+    - native_prompt: 直接發送給模型的 prompt（可選，如果提供則優先使用）
     """
     if not framepack_process_video:
         _ensure_process_video_loaded()
@@ -106,7 +108,12 @@ def generate_one_frame(
     # 打印 prompt 與 seed（seed 使用 0..2^31-1）
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"[Preview] prompt='{prompt or ''}'")
+    
+    # 直接使用 prompt；負面提示詞使用 negative_prompt（若提供）
+    final_prompt = prompt
+    logger.info(f"[Preview] user_prompt='{prompt or ''}'")
+    logger.info(f"[Preview] negative_prompt='{negative_prompt or 'N/A'}'")
+    logger.info(f"[Preview] final_prompt='{final_prompt or ''}'")
     logger.info(f"[Preview] duration_seconds={duration_seconds}")
     _seed = random.randint(0, (2**31) - 1)
     logger.info(f"[Preview] seed={_seed}")
@@ -114,13 +121,15 @@ def generate_one_frame(
         start_image_path=prev_image_path,
         end_image_path=None,
         progress_callback=progress_callback,
-        prompt=prompt or "",
-        n_prompt="",
+        prompt=final_prompt or "",
+        # 將 negative_prompt 對應到 n_prompt（負面提示）
+        n_prompt=negative_prompt or "",
         seed=_seed,
         total_second_length=float(duration_seconds),
         latent_window_size=9,
         steps=25,
-        cfg=1.0,
+        # 提升文字條件權重，讓 prompt 更有影響力
+        cfg=3.0,
         gs=10.0,
         rs=0.0,
         gpu_memory_preservation=6,

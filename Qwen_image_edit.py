@@ -33,17 +33,25 @@ def get_qwen_image_edit_pipeline():
     
     return _global_pipe
 
-def generate_qwen_image_edit(image_path, prompt, output_path, negative_prompt="", num_inference_steps=25, seed=None):
+def generate_qwen_image_edit(
+    image_path,
+    prompt,
+    output_path,
+    negative_prompt="",
+    num_inference_steps=25,
+    seed=None,
+):
     """
     使用 Qwen Image Edit 生成編輯後的圖片
     
     Args:
         image_path: 輸入圖片路徑
-        prompt: 編輯提示詞
+        prompt: 用戶描述（用於分類等）
         output_path: 輸出圖片路徑
         negative_prompt: 負面提示詞
         num_inference_steps: 推理步數
         seed: 隨機種子，None 則使用隨機
+        native_prompt: 直接發送給模型的 prompt（可選，如果提供則優先使用）
     
     Returns:
         成功返回輸出路徑，失敗返回 None
@@ -60,13 +68,20 @@ def generate_qwen_image_edit(image_path, prompt, output_path, negative_prompt=""
             seed = torch.randint(0, 2**32, (1,)).item()
         generator = torch.Generator(device="cuda").manual_seed(seed)
         
+        # 直接使用 prompt / negative_prompt
+        final_prompt = prompt
+        final_negative = negative_prompt
+        print(f"Qwen Image Edit - user_prompt: {prompt}")
+        print(f"Qwen Image Edit - final_prompt: {final_prompt}")
+        print(f"Qwen Image Edit - final_negative: {final_negative}")
+        
         # 生成圖片
         result = pipe(
             image=image,
-            prompt=prompt,
+            prompt=final_prompt,
             num_inference_steps=num_inference_steps,
             generator=generator,
-            negative_prompt=negative_prompt
+            negative_prompt=final_negative
         ).images[0]
         
         # 保存結果

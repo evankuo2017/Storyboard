@@ -206,6 +206,7 @@ def extract_remove_bounding_boxes(image: str, user_prompt: str, max_attempts: in
         "Task: From the user's prompt, extract all object categories that should be removed if present in the image.\n"
         "Look at the image and return bounding boxes for each matched object you find.\n"
         "Be highly sensitive to very small objects and tiny details.\n"
+        "You can expand the bounding box to ensure the object (and its shadows) are fully contained.\n"
         "Prefer high recall: if uncertain, include a plausible bounding box (slightly larger is acceptable) rather than missing the object.\n"
         "Output strictly JSON with key 'boxes'.\n"
         "- boxes: array of {label: string, box_xyxy: [x0,y0,x1,y1]} where coordinates are integer pixels,\n"

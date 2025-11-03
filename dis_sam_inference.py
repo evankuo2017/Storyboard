@@ -356,7 +356,7 @@ _global_isnet_device = None
 
 def _load_sam_model(
     checkpoint: Optional[str] = None,
-    model_type: str = "vit_l",
+    model_type: str = "vit_h",
     device: Optional[str] = None,
     auto_download: bool = True,
 ):

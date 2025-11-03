@@ -1161,11 +1161,12 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 node_index = payload.get('node_index')
                 prev_node_index = payload.get('prev_node_index')
                 user_prompt = payload.get('user_prompt', '')  # 用戶輸入的 prompt
+                negative_prompt = payload.get('negative_prompt', '')  # 負面提示詞
                 reference_image_data = payload.get('reference_image_data')  # 參考圖片 base64 數據
                 reference_image_type = payload.get('reference_image_type', 'image/png')  # 參考圖片類型
                 duration_seconds = float(payload.get('duration_seconds', 1.0))
                 
-                logger.info(f"[Generate] 節點 {node_index}, prompt: {user_prompt[:50]}..., duration: {duration_seconds}s")
+                logger.info(f"[Generate] 節點 {node_index}, prompt: {user_prompt[:50]}..., negative_prompt: {negative_prompt[:50] if negative_prompt else 'N/A'}, duration: {duration_seconds}s")
 
                 # 驗證：需要有參考圖片
                 if not reference_image_data:
@@ -1281,11 +1282,14 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                             try:
                                 from Qwen_image_edit import generate_qwen_image_edit, unload_qwen_image_edit
                                 
+                                logger.info(f"Qwen Image Edit - user_prompt: {user_prompt[:50]}...")
+                                logger.info(f"Qwen Image Edit - negative_prompt: {negative_prompt[:50] if negative_prompt else 'N/A'}...")
+                                
                                 result_path = generate_qwen_image_edit(
                                     image_path=reference_image_file,
-                                    prompt=user_prompt,  # 使用用戶輸入的 prompt
+                                    prompt=user_prompt,
                                     output_path=tmp_image_path,
-                                    negative_prompt="blurry, low quality, distorted",
+                                    negative_prompt=(negative_prompt or "blurry, low quality, distorted"),
                                     num_inference_steps=25,
                                     seed=torch.randint(0, 2**32, (1,)).item()
                                 )
@@ -1308,8 +1312,14 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                         elif qwen_label == 2:
                             logger.info("選擇 ObjectClear")
                             try:
-                                # 呼叫 Qwen 的框選任務（使用用戶輸入的 prompt）
-                                boxes_result = extract_remove_bounding_boxes(reference_image_file, user_prompt) or {"boxes": []}
+                                # 構建給 Qwen 的 prompt：如果有 native_prompt，則在最後加上
+                                qwen_prompt = user_prompt
+                                if negative_prompt:
+                                    qwen_prompt = user_prompt + " do not remove the object list below: " + negative_prompt
+                                    logger.info(f"ObjectClear 使用擴展 prompt: {qwen_prompt[:100]}...")
+                                
+                                # 呼叫 Qwen 的框選任務
+                                boxes_result = extract_remove_bounding_boxes(reference_image_file, qwen_prompt) or {"boxes": []}
                                 task_status[job_id]['remove_boxes'] = boxes_result
                                 
                                 # 完成框選後立即卸載 Qwen
@@ -1404,7 +1414,19 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                             
                             try:
                                 from generate_preview import generate_one_frame
-                                generate_one_frame(reference_image_file, user_prompt, tmp_image_path, progress_cb=progress_cb, cancel_cb=cancel_cb, duration_seconds=duration_seconds)
+                                
+                                logger.info(f"FramePack - user_prompt: {user_prompt[:50]}...")
+                                logger.info(f"FramePack - negative_prompt: {negative_prompt[:50] if negative_prompt else 'N/A'}...")
+                                
+                                generate_one_frame(
+                                    prev_image_path=reference_image_file,
+                                    prompt=user_prompt,
+                                    out_image_path=tmp_image_path,
+                                    progress_cb=progress_cb,
+                                    cancel_cb=cancel_cb,
+                                    duration_seconds=duration_seconds,
+                                    negative_prompt=negative_prompt if negative_prompt else None
+                                )
                                 # FramePack單幀生成完成後釋放顯存
                                 unload_framepack()
              
