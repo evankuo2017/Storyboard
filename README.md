@@ -18,6 +18,7 @@ conda activate storyboard
 
 # Install PyTorch (CUDA version)
 python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+# python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126 (if want to use grounding dino.)
 
 # Install dependencies
 pip install -r requirements.txt
@@ -51,6 +52,8 @@ Users are responsible for complying with the original licenses when using or red
 | Segment Anything Model (SAM) | Apache License 2.0 | Permitted | [https://github.com/facebookresearch/segment-anything](https://github.com/facebookresearch/segment-anything) |
 | FramePack | Apache License 2.0 | Permitted | [https://github.com/lllyasviel/FramePack](https://github.com/lllyasviel/FramePack) |
 | ObjectClear | NTU S-Lab License 1.0 *(Non-Commercial)* | Not permitted | [https://github.com/zjx0101/ObjectClear](https://github.com/zjx0101/ObjectClear) |
+| Qwen-Image-Edit | Apache License 2.0 | Permitted | [https://huggingface.co/Qwen/Qwen-Image-Edit](https://huggingface.co/Qwen/Qwen-Image-Edit) |
+| Qwen-Image-Edit2509 | Apache License 2.0 | Permitted | Base: Qwen-Image-Edit — [https://huggingface.co/Qwen/Qwen-Image-Edit](https://huggingface.co/Qwen/Qwen-Image-Edit) |
 
 
 

@@ -68,8 +68,8 @@ except ImportError:
 
 # ========== 硬編碼的測試數據（可選） ==========
 # 如果沒有通過命令行參數提供，將使用這些默認值
-DEFAULT_IMAGE_PATH = "test_image.jpg"  # 請修改為實際的圖片路徑
-DEFAULT_PROMPT = "remove the soccer net"  # 測試 prompt
+DEFAULT_IMAGE_PATH = "test_image.png"  # 請修改為實際的圖片路徑
+DEFAULT_PROMPT = "remove all the railings"  # 測試 prompt
 
 
 def overlay_mask_on_image(

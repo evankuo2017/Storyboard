@@ -1,6 +1,6 @@
 
 accelerate==1.6.0
-diffusers==0.35
+git+https://github.com/huggingface/diffusers
 transformers==4.52.2
 gradio==5.23.0
 sentencepiece==0.2.0
@@ -22,6 +22,10 @@ protobuf==4.25.3
 
 segment-anything==1.0
 
-torchao==0.14.1  #降低Qwen-Image-Edit精度用的
+#torchao==0.14.1  #如果要用Qwen-Image-Edit(非2509版本)降精度用的
 
 gdown==5.2.0
+
+dfloat11[cuda12]==0.5.0
+
+# git+https://github.com/IDEA-Research/GroundingDINO.git

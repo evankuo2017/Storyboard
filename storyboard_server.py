@@ -1280,31 +1280,31 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                 logger.warning(f"Qwen 卸載失敗: {e}")
                             
                             try:
-                                from Qwen_image_edit import generate_qwen_image_edit, unload_qwen_image_edit
-                                
+                                from Qwen_image_edit2509 import generate_qwen_image_edit_2509, unload_qwen_image_edit_2509
+
                                 logger.info(f"Qwen Image Edit - user_prompt: {user_prompt[:50]}...")
                                 logger.info(f"Qwen Image Edit - negative_prompt: {negative_prompt[:50] if negative_prompt else 'N/A'}...")
-                                
-                                result_path = generate_qwen_image_edit(
+
+                                result_path = generate_qwen_image_edit_2509(
                                     image_path=reference_image_file,
                                     prompt=user_prompt,
                                     output_path=tmp_image_path,
                                     negative_prompt=(negative_prompt or "blurry, low quality, distorted"),
-                                    num_inference_steps=25,
+                                    steps=25,
                                     seed=torch.randint(0, 2**32, (1,)).item()
                                 )
-                                
+
                                 if result_path is None:
                                     raise RuntimeError("Qwen Image Edit 生成失敗")
-                                    
+
                                 logger.info("Qwen Image Edit 生成完成")
-                                
-                                # 卸載 Qwen Image Edit 模型
+
+                                # 卸載 Qwen Image Edit 模型（2509）
                                 try:
-                                    unload_qwen_image_edit()
+                                    unload_qwen_image_edit_2509()
                                 except Exception as e:
                                     logger.warning(f"Qwen Image Edit 卸載失敗: {e}")
-                                
+
                             except Exception as e:
                                 logger.error(f"Qwen Image Edit 失敗: {e}")
                                 raise RuntimeError(f"Qwen Image Edit 生成失敗: {e}")

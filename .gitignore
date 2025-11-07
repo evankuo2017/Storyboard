@@ -9,3 +9,6 @@ storyboard_outputs/
 
 # SAM checkpoints
 checkpoints/
+
+# Qwen Image Edit 2509 DF11
+DFloat11__Qwen-Image-Edit-2509-DF11/
