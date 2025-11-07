@@ -49,11 +49,13 @@ Users are responsible for complying with the original licenses when using or red
 | Model Name | License Type | Commercial Use | Source Repository / Reference |
 |-------------|---------------|----------------|--------------------------------|
 | Qwen2.5-VL-7B-Instruct | Apache License 2.0 *(verify specific version; some releases may include additional restrictions)* | Permitted | [https://github.com/QwenLM/Qwen2.5-VL](https://github.com/QwenLM/Qwen2.5-VL) |
+| DIS-SAM | MIT | Permitted | [https://github.com/Tennine2077/DIS-SAM/?tab=readme-ov-file](https://github.com/Tennine2077/DIS-SAM/?tab=readme-ov-file) |
 | Segment Anything Model (SAM) | Apache License 2.0 | Permitted | [https://github.com/facebookresearch/segment-anything](https://github.com/facebookresearch/segment-anything) |
 | FramePack | Apache License 2.0 | Permitted | [https://github.com/lllyasviel/FramePack](https://github.com/lllyasviel/FramePack) |
 | ObjectClear | NTU S-Lab License 1.0 *(Non-Commercial)* | Not permitted | [https://github.com/zjx0101/ObjectClear](https://github.com/zjx0101/ObjectClear) |
 | Qwen-Image-Edit | Apache License 2.0 | Permitted | [https://huggingface.co/Qwen/Qwen-Image-Edit](https://huggingface.co/Qwen/Qwen-Image-Edit) |
-| Qwen-Image-Edit2509 | Apache License 2.0 | Permitted | Base: Qwen-Image-Edit — [https://huggingface.co/Qwen/Qwen-Image-Edit-2509](https://huggingface.co/Qwen/Qwen-Image-Edit-2509) |
+| Qwen-Image-Edit2509 | Apache License 2.0 | Permitted | [https://huggingface.co/Qwen/Qwen-Image-Edit-2509](https://huggingface.co/Qwen/Qwen-Image-Edit-2509) |
+
 
 
 
