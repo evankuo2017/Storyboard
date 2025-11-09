@@ -34,7 +34,7 @@ _models = None
 _high_vram = None
 
 def init_models():
-    """初始化模型，只需要執行一次"""
+    """初始化模型"""
     global _models, _high_vram
     
     if _models is not None:
