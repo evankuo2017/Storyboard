@@ -4,6 +4,7 @@ import argparse
 import os
 import torch
 import json
+import re
 from PIL import Image
 
 # 設定 HuggingFace cache 下載目錄 (hf_download) 於當前工作目錄
@@ -97,20 +98,18 @@ def classify_image_edit_task(image: str, user_prompt: str, max_attempts: int = 5
         "The user_prompt is the text that indicates the way to edit the image.\n"
         "Using the image content and the provided user_prompt to decide the task type.\n"
         "Categories (use the number only):\n"
-        "0 — The text asks not to change the background and generate or change a \"single\" object that interacts with the original image.\n"
+        "0 — The text asks to zoom out or expand the original image.\n"
         "2 — Remove one or many objects from the original image, without making other modifications.\n"
         "otherwise, 1.\n"
 
-        "if the user_prompt asks not to change the background,keeping the background unchanged, or the same meaning, it must be 0, this is the most important rule !!!\n"
-        "All of these words should be 0: Do not alter the background, Do not change the background, Do not modify the background, Maintain the background, Ensure the background remains identical.\n"
-        "If the user_prompt only add one item to the image, it must be 0.\n"
+        "0 means the user_prompt asks to zoom out or expand the original image, if contains other actions, it still should be 0.\n"
 
         "Strictly output a single number only: 0 or 1 or 2.\n"
         "example: if the user_prompt is 'remove the cats and dogs from the image', the output should be 2\n"
-        "example: if the user_prompt is 'generate a cat in the image, do not change the background', the output should be 0\n"
-        "example: if the user_prompt is 'the woods in the image on fire, keeping the background same', the output should be 0\n"
-        "example: if the user_prompt is 'generate a pig in the image', the output should be 0\n"
-        "example: if the user_prompt is 'generate some pigs in the image', the output should be 1\n"
+        "example: if the user_prompt is 'zoom out the image', the output should be 0\n"
+        "example: if the user_prompt is 'expand the image', the output should be 0\n"
+        "example: if the user_prompt is 'zoom out the image and generate some stars, longer the girl's body', the output should be 0\n"
+        "example: if the user_prompt is 'remove the cat and generate some pigs in the image', the output should be 1\n"
 
         "output 1 means the user_prompt contains many kinds of actions such as Remove, generate, switch item, or add many objects even change the background."
     )
@@ -178,6 +177,116 @@ def classify_image_edit_task(image: str, user_prompt: str, max_attempts: int = 5
 
     # 若多次嘗試仍失敗，預設回傳 1（general case）
     return 1
+
+
+def analyze_zoom_out_ratio(image: str, user_prompt: str, max_attempts: int = 5) -> int:
+    """
+    分析擴圖任務的縮圖比例建議。
+    當任務為「將原圖縮小置中後進行擴圖」時，根據圖片內容與 prompt 判斷最適當的縮圖比例。
+    
+    Args:
+        image: 圖片檔案路徑或 URL
+        user_prompt: 文字提示（prompt）
+        max_attempts: 最多重試推理次數
+    
+    Returns:
+        int: 建議的縮圖比例（10-50之間的整數，表示百分比）
+             例如：回傳 30 代表建議將原圖縮小至 30% 後置中，然後擴圖填充周圍
+    """
+    model, processor = get_qwen_model_and_processor()
+
+    system_prompt = (
+        "You are a task analyst specialized in image outpainting operations.\n"
+        "The user wants to zoom out / expand the image. This means:\n"
+        "1. The original image will be shrunk to a certain percentage\n"
+        "2. The shrunk image will be placed in the center\n"
+        "3. AI will generate/expand content around the shrunk image to fill the canvas\n\n"
+        
+        "Your task: Analyze the image content and the user_prompt, then suggest the most appropriate shrink ratio.\n"
+        "Consider these factors:\n"
+        "- If the user wants to show much more surrounding context or add large new areas, suggest larger ratio (35-50%)\n"
+        "- If the user wants moderate expansion to show some additional context, suggest medium ratio (25-35%)\n"
+        "- If the user only wants slight expansion or minor additions, suggest smaller ratio (10-25%)\n"
+        "- Consider the composition: images with important central subjects may need higher ratios to preserve details\n"
+        "- Consider the complexity of generation: more complex new content may benefit from having more space (smaller ratio)\n\n"
+        
+        "Output strictly a single integer number between 10 and 50 (inclusive).\n"
+        "Do not include '%' symbol or any other text. Just the number.\n"
+        "Examples:\n"
+        "- If user wants 'zoom out and show the full building', output might be: 25\n"
+        "- If user wants 'expand slightly to show more sky', output might be: 10\n"
+        "- If user wants 'zoom out a lot and add surrounding landscape', output might be: 45\n"
+    )
+
+    messages = [
+        {
+            "role": "system",
+            "content": [
+                {"type": "text", "text": system_prompt},
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "image": image,
+                },
+                {
+                    "type": "text", 
+                    "text": f"Analyze this zoom-out/expand task. user_prompt: {user_prompt}"
+                },
+            ],
+        },
+    ]
+
+    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    image_inputs, video_inputs = process_vision_info(messages)
+    inputs = processor(
+        text=[text],
+        images=image_inputs,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt",
+    )
+    
+    # 確保所有輸入張量都在正確的設備上
+    if torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
+    
+    inputs = {k: v.to(device) if hasattr(v, 'to') else v for k, v in inputs.items()}
+
+    attempt = 0
+    while attempt < max_attempts:
+        generated_ids = model.generate(**inputs, max_new_tokens=128)
+        generated_ids_trimmed = [
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs['input_ids'], generated_ids)
+        ]
+        output_text = processor.batch_decode(
+            generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )
+
+        # 解析輸出，嘗試提取數字
+        if output_text and output_text[0]:
+            raw_output = output_text[0].strip()
+            print(f"[Qwen][analyze_zoom_out_ratio] 第 {attempt + 1} 次嘗試，模型回傳: {raw_output}")
+            
+            # 提取數字
+            numbers = re.findall(r'\d+', raw_output)
+            if numbers:
+                ratio = int(numbers[0])
+                # 驗證範圍
+                if 10 <= ratio <= 50:
+                    print(f"[Qwen][analyze_zoom_out_ratio] 分析完成，建議縮圖比例: {ratio}%")
+                    return ratio
+        
+        attempt += 1
+
+    # 若多次嘗試仍失敗，預設回傳 30%（中等縮放比例）
+    print("[Qwen][analyze_zoom_out_ratio] 多次嘗試失敗，使用預設值: 30%")
+    return 30
 
 
 def extract_remove_bounding_boxes(image: str, user_prompt: str, max_attempts: int = 3):

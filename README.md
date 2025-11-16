@@ -18,7 +18,6 @@ conda activate storyboard
 
 # Install PyTorch (CUDA version)
 python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
-# python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126 (if want to use grounding dino.)
 
 # Install dependencies
 pip install -r requirements.txt

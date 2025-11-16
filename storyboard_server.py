@@ -16,11 +16,45 @@ import queue
 import uuid
 import sys
 import random
+import tempfile
+import shutil
 import numpy as np
 from PIL import Image
 import torch
 import traceback
+
+# FramePack 相關
 from framepack_start_end import process_video as framepack_process_video, unload_framepack
+
+# Qwen 相關（分類、框選、縮圖比例分析）
+from Qwen_inference import (
+    get_qwen_model_and_processor,
+    classify_image_edit_task,
+    extract_remove_bounding_boxes,
+    analyze_zoom_out_ratio,
+    unload_qwen
+)
+
+# Qwen Image Edit 2509
+from Qwen_image_edit2509 import (
+    generate_qwen_image_edit_2509,
+    unload_qwen_image_edit_2509
+)
+
+# DIS-SAM（物件分割）
+from dis_sam_inference import (
+    generate_masks_with_dis_sam,
+    unload_dis_sam_model
+)
+
+# ObjectClear（物件移除）
+from inference_objectclear import infer_on_two_images
+
+# Diffusers Image Outpaint（擴圖）
+from diffusers_image_outpaint_inference import (
+    outpaint_center_shrink,
+    unload_outpaint
+)
 
 # 設置日誌
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -1246,13 +1280,6 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 # 背景執行：依序進行 Qwen 分類與單幀生成
                 def run_job():
                     try:
-                        # 導入必要的模組
-                        try:
-                            from Qwen_inference import get_qwen_model_and_processor, classify_image_edit_task, extract_remove_bounding_boxes, unload_qwen
-                        except Exception:
-                            sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-                            from Qwen_inference import get_qwen_model_and_processor, classify_image_edit_task, extract_remove_bounding_boxes, unload_qwen
-
                         # Qwen 分類階段（使用用戶輸入的 prompt）
                         task_status[job_id]['message'] = '分類中（Qwen）...'
                         task_status[job_id]['progress'] = 5
@@ -1266,7 +1293,6 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                         task_status[job_id]['message'] = '開始生成圖片...'
                         task_status[job_id]['progress'] = 10
 
-                        import tempfile
                         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
                             tmp_image_path = tmp_file.name
 
@@ -1280,8 +1306,6 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                 logger.warning(f"Qwen 卸載失敗: {e}")
                             
                             try:
-                                from Qwen_image_edit2509 import generate_qwen_image_edit_2509, unload_qwen_image_edit_2509
-
                                 logger.info(f"Qwen Image Edit - user_prompt: {user_prompt[:50]}...")
                                 logger.info(f"Qwen Image Edit - negative_prompt: {negative_prompt[:50] if negative_prompt else 'N/A'}...")
 
@@ -1329,9 +1353,6 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                     logger.warning(f"Qwen 卸載失敗: {e}")
                                 
                                 # 使用 DIS-SAM 產生精確 mask（兩階段：SAM + IS-Net 精煉）
-                                from dis_sam_inference import generate_masks_with_dis_sam, unload_dis_sam_model
-                                import tempfile
-                                
                                 with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_mask:
                                     tmp_mask_path = tmp_mask.name
                                 
@@ -1355,8 +1376,6 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                     logger.warning(f"DIS-SAM 模型卸載失敗: {e}")
                                 
                                 # 使用 ObjectClear 模型完成物件移除
-                                from inference_objectclear import infer_on_two_images
-                                
                                 # 呼叫 ObjectClear 推理
                                 logger.info("開始 ObjectClear 推理...")
                                 final_output_path = infer_on_two_images(
@@ -1371,7 +1390,6 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                 )
                                 
                                 # 將 ObjectClear 的結果複製到最終輸出
-                                import shutil
                                 shutil.copy2(final_output_path, tmp_image_path)
                                 
                                 # 清理檔案
@@ -1390,53 +1408,86 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                 
                                 # 確保在錯誤時也卸載 DIS-SAM 模型
                                 try:
-                                    from dis_sam_inference import unload_dis_sam_model
                                     unload_dis_sam_model()
                                     logger.info("DIS-SAM 模型已卸載（錯誤處理）")
                                 except Exception as unload_error:
                                     logger.warning(f"DIS-SAM 模型卸載失敗: {unload_error}")
                                 
                                 # 創建黑色圖片（使用參考圖片的尺寸）
-                                from PIL import Image as PILImage
                                 with Image.open(reference_image_file) as img:
                                     width, height = img.size
-                                black_img = PILImage.new('RGB', (width, height), (0, 0, 0))
+                                black_img = Image.new('RGB', (width, height), (0, 0, 0))
                                 black_img.save(tmp_image_path)
                                 logger.info("已輸出黑色圖片")
                                 
                         else:
-                            # FramePack 
-                            # 先卸載 Qwen 分類模型，避免顯存衝突
+                            # Diffusers Image Outpaint
+                            logger.info("選擇 Diffusers Image Outpaint")
+                            try:
+                                # 更新進度：正在分析縮圖比例
+                                task_status[job_id]['message'] = '分析最佳縮圖比例（Qwen）...'
+                                task_status[job_id]['progress'] = 12
+                                
+                                logger.info("開始使用 Qwen 分析最佳縮圖比例...")
+                                shrink_percent = analyze_zoom_out_ratio(reference_image_file, user_prompt)
+                                logger.info(f"Qwen 建議的縮圖比例: {shrink_percent}%")
+                                
+                                # 將分析結果記錄到任務狀態中
+                                task_status[job_id]['shrink_percent'] = shrink_percent
+                                
+                            except Exception as e:
+                                logger.error(f"Qwen 分析縮圖比例失敗: {e}")
+                                # 如果分析失敗，使用基於時長的預設值
+                                shrink_percent = min(duration_seconds * 10, 30.0)
+                                logger.info(f"使用預設縮圖比例: {shrink_percent}% (based on duration: {duration_seconds}s)")
+                            
+                            # 完成分析後立即卸載 Qwen（照 label 2 的簡潔寫法）
                             try:
                                 unload_qwen()
                             except Exception as e:
                                 logger.warning(f"Qwen 卸載失敗: {e}")
                             
                             try:
-                                from generate_preview import generate_one_frame
+                                logger.info(f"Diffusers Outpaint - user_prompt: {user_prompt[:50]}...")
+                                logger.info(f"Diffusers Outpaint - negative_prompt: {negative_prompt[:50] if negative_prompt else 'N/A'}...")
+                                logger.info(f"Diffusers Outpaint - shrink_percent: {shrink_percent}% (analyzed by Qwen)")
                                 
-                                logger.info(f"FramePack - user_prompt: {user_prompt[:50]}...")
-                                logger.info(f"FramePack - negative_prompt: {negative_prompt[:50] if negative_prompt else 'N/A'}...")
+                                # 更新進度
+                                task_status[job_id]['message'] = 'Outpaint 生成中...'
+                                task_status[job_id]['progress'] = 15
                                 
-                                generate_one_frame(
-                                    prev_image_path=reference_image_file,
-                                    prompt=user_prompt,
-                                    out_image_path=tmp_image_path,
-                                    progress_cb=progress_cb,
-                                    cancel_cb=cancel_cb,
-                                    duration_seconds=duration_seconds,
-                                    negative_prompt=negative_prompt if negative_prompt else None
+                                # 呼叫 outpaint 推理
+                                result_path = outpaint_center_shrink(
+                                    image=reference_image_file,
+                                    prompt="keep the original art style and expand the image, " + user_prompt,
+                                    shrink_percent=shrink_percent,
+                                    output_path=tmp_image_path,
+                                    negative_prompt=negative_prompt if negative_prompt else None,
+                                    num_inference_steps=20,  
+                                    seed=torch.randint(0, 2**32, (1,)).item(),
+                                    overlap_percentage=2,  # 2% 重疊
+                                    return_dict=False
                                 )
-                                # FramePack單幀生成完成後釋放顯存
-                                unload_framepack()
+                                
+                                if result_path is None or not os.path.exists(result_path):
+                                    raise RuntimeError("Diffusers Outpaint 生成失敗")
+                                
+                                logger.info("Diffusers Outpaint 生成完成")
+                                
+                                # 卸載 Outpaint 模型
+                                try:
+                                    unload_outpaint()
+                                    logger.info("Outpaint 模型已卸載")
+                                except Exception as e:
+                                    logger.warning(f"Outpaint 模型卸載失敗: {e}")
              
                             except Exception as e:
-                                logger.error(f"FramePack 生成失敗: {e}")
-                                raise RuntimeError(f"FramePack 生成失敗: {e}")
+                                logger.error(f"Diffusers Outpaint 生成失敗: {e}")
+                                traceback.print_exc()
+                                raise RuntimeError(f"Diffusers Outpaint 生成失敗: {e}")
 
                         # 讀取並編碼圖片
                         with open(tmp_image_path, 'rb') as img_file:
-                            import base64
                             image_data = base64.b64encode(img_file.read()).decode('utf-8')
                         
                         # 清理臨時檔案（包括參考圖片）
