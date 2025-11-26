@@ -101,7 +101,7 @@ default_params = {
     "mp4_crf": 16
 }
 
-def create_tasks_from_nodes_and_transitions_direct(nodes, transitions, project_folder):
+def create_tasks_from_nodes_and_transitions_direct(nodes, transitions, project_folder, target_pairs=None):
     """
     直接從節點和轉場數據創建視頻處理任務（用於重新生成）
     
@@ -109,6 +109,7 @@ def create_tasks_from_nodes_and_transitions_direct(nodes, transitions, project_f
         nodes: 節點數據列表
         transitions: 轉場數據列表
         project_folder: 現有的專案資料夾路徑
+        target_pairs: 指定要處理的節點對列表 [(from_idx, to_idx), ...]，若為 None 則處理全部
     
     Returns:
         添加的任務ID列表，或錯誤信息
@@ -116,11 +117,17 @@ def create_tasks_from_nodes_and_transitions_direct(nodes, transitions, project_f
     try:
         job_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         project_image_folder = os.path.join(project_folder, "images")
-        
         if len(nodes) < 2:
             error_msg = f"節點少於2個，無法創建任務"
             logger.warning(error_msg)
             return {"success": False, "message": "需要至少2個節點才能生成影片。"}
+        
+        if target_pairs is not None:
+            target_pair_set = {tuple(pair) for pair in target_pairs}
+            relevant_indices = {idx for pair in target_pair_set for idx in pair}
+        else:
+            target_pair_set = None
+            relevant_indices = set(range(len(nodes)))
         
         # 檢查所有節點是否都有圖片
         logger.info(f"檢查重生任務的圖片，專案圖片資料夾: {project_image_folder}")
@@ -137,6 +144,8 @@ def create_tasks_from_nodes_and_transitions_direct(nodes, transitions, project_f
         node_image_paths = {}  # 儲存每個節點的實際圖片路徑
         
         for i, node in enumerate(nodes):
+            if i not in relevant_indices:
+                continue
             has_image = node.get("hasImage", False)
             image_path = node.get("imagePath")
             
@@ -205,8 +214,12 @@ def create_tasks_from_nodes_and_transitions_direct(nodes, transitions, project_f
         
         task_ids = []
         
-        # 為每相鄰的節點對創建任務
+        # 為指定的節點對創建任務（未指定則處理全部）
         for i in range(len(nodes) - 1):
+            pair = (i, i + 1)
+            if target_pair_set is not None and pair not in target_pair_set:
+                continue
+            
             start_node = nodes[i]
             end_node = nodes[i + 1]
             
@@ -830,8 +843,47 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                         else:
                             logger.warning(f"節點 {node_index} 沒有找到對應的圖片檔案")
                 
-                # 添加專案資料夾信息到回應中
-                data['project_folder'] = os.path.join(OUTPUT_DIR, project_folder) if project_folder else None
+                # 添加專案資料夾與段落影片資訊
+                project_folder_path = os.path.join(OUTPUT_DIR, project_folder) if project_folder else None
+                data['project_folder'] = project_folder_path
+                data['project_folder_name'] = project_folder
+
+                segment_videos = []
+                if project_folder_path and os.path.exists(project_folder_path):
+                    node_count = len(data.get('nodes', []))
+                    for i in range(max(0, node_count - 1)):
+                        prefix = f"video_{i}_{i+1}_"
+                        latest_file = None
+                        latest_mtime = None
+
+                        for fname in os.listdir(project_folder_path):
+                            if fname.startswith(prefix) and fname.endswith('.mp4'):
+                                fpath = os.path.join(project_folder_path, fname)
+                                mtime = os.path.getmtime(fpath)
+                                if latest_mtime is None or mtime > latest_mtime:
+                                    latest_file = fname
+                                    latest_mtime = mtime
+
+                        if latest_file:
+                            task_id = latest_file[:-4]
+                            output_file = os.path.join(project_folder_path, latest_file)
+                            segment_videos.append({
+                                "from": i,
+                                "to": i + 1,
+                                "file": latest_file,
+                                "task_id": task_id
+                            })
+
+                            existing_status = task_status.get(task_id, {})
+                            if existing_status.get("status") not in {"queued", "processing"}:
+                                task_status[task_id] = {
+                                    "status": "completed",
+                                    "progress": 100,
+                                    "message": "已完成",
+                                    "output_file": output_file,
+                                }
+
+                data['segment_videos'] = segment_videos
                 
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
@@ -1136,23 +1188,64 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
             
             try:
                 data = json.loads(post_data.decode('utf-8'))
-                project_folder = data.get('project_folder')
-                nodes = data.get('nodes', [])
-                transitions = data.get('transitions', [])
+                project_folder_value = data.get('project_folder')
+                from_node_value = data.get('from_node')
+                to_node_value = data.get('to_node')
+                new_seed = data.get('new_seed')
                 
-                logger.info(f"重生請求: project_folder={project_folder}")
-                logger.info(f"重生請求: nodes數量={len(nodes)}, transitions數量={len(transitions)}")
+                logger.info(f"重生請求: project_folder={project_folder_value}, from_node={from_node_value}, to_node={to_node_value}, new_seed={new_seed}")
                 
-                if not project_folder:
+                if project_folder_value is None:
                     raise ValueError("No project folder provided")
+                if from_node_value is None or to_node_value is None:
+                    raise ValueError("from_node and to_node are required")
                 
-                if not os.path.exists(project_folder):
-                    raise ValueError(f"Project folder does not exist: {project_folder}")
+                from_node = int(from_node_value)
+                to_node = int(to_node_value)
                 
-                logger.info(f"專案資料夾存在: {project_folder}")
+                # 解析專案資料夾路徑（允許傳入相對或絕對路徑）
+                if os.path.isabs(project_folder_value):
+                    project_folder_path = project_folder_value
+                    project_folder_name = os.path.relpath(project_folder_value, OUTPUT_DIR)
+                else:
+                    project_folder_name = project_folder_value
+                    project_folder_path = os.path.join(OUTPUT_DIR, project_folder_value)
                 
-                # 直接從提供的節點和轉場數據創建任務
-                result = create_tasks_from_nodes_and_transitions_direct(nodes, transitions, project_folder)
+                if not os.path.exists(project_folder_path):
+                    raise ValueError(f"Project folder does not exist: {project_folder_path}")
+                
+                # 找到專案中的 storyboard JSON 檔案（取最新修改時間）
+                json_files = [
+                    os.path.join(project_folder_path, f)
+                    for f in os.listdir(project_folder_path)
+                    if f.endswith('.json')
+                ]
+                if not json_files:
+                    raise ValueError(f"No storyboard JSON file found in project folder: {project_folder_path}")
+                storyboard_file = max(json_files, key=os.path.getmtime)
+                
+                with open(storyboard_file, 'r', encoding='utf-8') as f:
+                    storyboard_data = json.load(f)
+                
+                nodes = storyboard_data.get('nodes', [])
+                transitions = storyboard_data.get('transitions', [])
+                
+                # 更新節點 seed（若有提供）
+                if new_seed is not None and 0 <= to_node < len(nodes):
+                    nodes[to_node]['seed'] = new_seed
+                    storyboard_data['nodes'] = nodes
+                    with open(storyboard_file, 'w', encoding='utf-8') as f:
+                        json.dump(storyboard_data, f, ensure_ascii=False, indent=2)
+                        logger.info(f"已更新節點 {to_node} 的 seed 並寫回 {storyboard_file}")
+                
+                # 僅為指定段落創建任務
+                target_pair = [(from_node, to_node)]
+                result = create_tasks_from_nodes_and_transitions_direct(
+                    nodes,
+                    transitions,
+                    project_folder_path,
+                    target_pairs=target_pair,
+                )
                 
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
@@ -1163,7 +1256,8 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                     response = json.dumps({
                         'status': 'success',
                         'message': f'Created {len(result["task_ids"])} regeneration tasks',
-                        'task_ids': result["task_ids"]
+                        'task_ids': result["task_ids"],
+                        'project_folder': project_folder_name
                     })
                 else:
                     response = json.dumps({
@@ -1463,7 +1557,7 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                     shrink_percent=shrink_percent,
                                     output_path=tmp_image_path,
                                     negative_prompt=negative_prompt if negative_prompt else None,
-                                    num_inference_steps=20,  
+                                    num_inference_steps=8,  
                                     seed=torch.randint(0, 2**32, (1,)).item(),
                                     overlap_percentage=2,  # 2% 重疊
                                     return_dict=False

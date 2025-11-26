@@ -1253,91 +1253,77 @@
                     document.body.appendChild(dialog);
                 },
                 
-                // 重生影片（保持 prompt 不變，隨機 seed）
+                // 重生影片（單一片段重新生成）
                 regenerateVideo(taskId) {
-                    const confirmRegenerate = confirm("重生影片會保持相同的 prompt，但使用隨機 seed。是否繼續？");
-                    if (!confirmRegenerate) return;
-                    
-                    // 為所有節點生成新的隨機 seed
-                    this.nodes.forEach(node => {
-                        if (node.index > 0) { // 跳過第一個節點（不用於生成）
-                            node.seed = Math.floor(Math.random() * 2147483647);
-                        }
-                    });
-                    
-                    // 更新 UI 顯示新的 seed
-                    this.updateUI();
-                    
-                    // 重新處理 storyboard
-                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-                    const fileName = `${this.nodes.length}_${timestamp}_regenerate.json`;
-                    
-                    // 準備數據結構
-                    const storyboardData = {
-                        job_id: timestamp,
-                        nodes: [],
-                        transitions: [],
-                        file_name: fileName
-                    };
-                    
-                    // 處理所有節點
-                    for (let i = 0; i < this.nodes.length; i++) {
-                        const node = this.nodes[i];
-                        const nodeData = {
-                            index: i,
-                            time: node.time,
-                            hasImage: node.hasImage,
-                            seed: node.seed // 包含新的隨機 seed
-                        };
-                        
-                        // 添加圖片數據
-                        if (node.hasImage && node.imageUrl) {
-                            if (node.imageUrl.startsWith('data:')) {
-                                const base64Data = node.imageUrl.split(',')[1];
-                                nodeData.imageData = base64Data;
-                                nodeData.imageType = node.imageUrl.split(';')[0].split(':')[1];
-                            } else if (node.imageUrl.includes('/storyboard_outputs/image_output/')) {
-                                const segments = node.imageUrl.split('/');
-                                nodeData.imagePath = segments[segments.length - 1];
-                            }
-                        }
-                        
-                        storyboardData.nodes.push(nodeData);
-                        
-                        // 添加轉場到下一個節點
-                        if (i < this.nodes.length - 1) {
-                            const nextNode = this.nodes[i + 1];
-                            const transitionData = {
-                                from_node: i,
-                                to_node: i + 1,
-                                text: node.transitionText,
-                                time_range: [node.time, nextNode.time]
-                            };
-                            storyboardData.transitions.push(transitionData);
-                        }
+                    const match = /^video_(\d+)_(\d+)/.exec(taskId);
+                    if (!match) {
+                        alert('無法解析影片片段編號，請重新載入專案。');
+                        return;
                     }
                     
-                    // 發送到後端並開始處理
-                    fetch('/save_storyboard', {
+                    if (!this.currentProjectFolder) {
+                        alert('請先載入或建立專案後再進行重生。');
+                        return;
+                    }
+                    
+                    const fromNode = parseInt(match[1], 10);
+                    const toNode = parseInt(match[2], 10);
+                    
+                    const confirmRegenerate = confirm(`重生節點 ${fromNode} → ${toNode} 的影片，將使用新的 seed。是否繼續？`);
+                    if (!confirmRegenerate) return;
+                    
+                    const newSeed = Math.floor(Math.random() * 2147483647);
+                    if (this.nodes[toNode]) {
+                        this.nodes[toNode].seed = newSeed;
+                    }
+                    this.updateUI();
+                    
+                    const payload = {
+                        project_folder: this.currentProjectFolder,
+                        from_node: fromNode,
+                        to_node: toNode,
+                        new_seed: newSeed
+                    };
+                    
+                    fetch('/regenerate_video', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify(storyboardData)
+                        body: JSON.stringify(payload)
                     })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.status === 'success') {
-                            // 立即開始處理視頻，使用專案資料夾名稱
-                            this.startVideoProcessing(data.project_folder);
-                        } else {
-                            alert(`重生失敗: ${data.message}`);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('重生影片錯誤:', error);
-                        alert(`重生失敗: ${error.message}`);
-                    });
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.status !== 'success') {
+                                alert(`重生失敗: ${data.message}`);
+                                return;
+                            }
+                            
+                            if (data.project_folder) {
+                                this.currentProjectFolder = data.project_folder;
+                            }
+                            
+                            const newTaskIds = Array.isArray(data.task_ids) ? data.task_ids : [];
+                            newTaskIds.forEach(id => {
+                                if (!this.taskIds.includes(id)) {
+                                    this.taskIds.push(id);
+                                }
+                            });
+                            
+                            const statusContainer = document.getElementById('processing-status-container');
+                            if (statusContainer) {
+                                statusContainer.style.display = 'block';
+                            }
+                            
+                            this.startTaskStatusPolling();
+                            if (statusMessageEl) {
+                                statusMessageEl.textContent = `已提交重生任務：${fromNode} → ${toNode}`;
+                            }
+                        })
+                        .catch(error => {
+                            console.error('重生影片錯誤:', error);
+                            alert(`重生失敗: ${error.message}`);
+                        });
                 },
                 
                 // Creates an initial node if none exists
@@ -2806,9 +2792,28 @@
                                             console.error("outputTextEl is null. Cannot set value.");
                                         }
                                         
-                                        document.getElementById('task-status-body').innerHTML = '';
-                                        state.taskIds = [];
-                                        document.getElementById('processing-status-container').style.display = 'none';
+                                        const statusTableBody = document.getElementById('task-status-body');
+                                        if (statusTableBody) {
+                                            statusTableBody.innerHTML = '';
+                                        }
+                                        
+                                        state.currentProjectFolder = storyboardData.project_folder_name || storyboardData.project_folder || state.currentProjectFolder;
+                                        const segmentVideos = Array.isArray(storyboardData.segment_videos) ? storyboardData.segment_videos : [];
+                                        state.segmentVideos = segmentVideos;
+                                        state.taskIds = Array.from(new Set(segmentVideos.map(seg => seg.task_id)));
+                                        
+                                        const statusContainer = document.getElementById('processing-status-container');
+                                        if (state.taskIds.length > 0) {
+                                            if (statusContainer) {
+                                                statusContainer.style.display = 'block';
+                                            }
+                                            state.startTaskStatusPolling();
+                                        } else {
+                                            if (statusContainer) {
+                                                statusContainer.style.display = 'none';
+                                            }
+                                            state.stopTaskStatusPolling();
+                                        }
                                         
                                         document.body.removeChild(dialog);
                                     })
