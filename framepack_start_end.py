@@ -218,9 +218,9 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
     # 創建進度回調
     progress = ProgressCallback(external_callback=progress_callback)
     
-    # 計算總潛在區段數
+    # 計算總區段數(影片要分成幾段)
     total_latent_sections = (params['total_second_length'] * 30) / (params['latent_window_size'] * 4)
-    total_latent_sections = int(max(round(total_latent_sections), 1))
+    total_latent_sections = int(max(round(total_latent_sections), 1)) # 四捨五入取整數，最少1段
     import logging
     logger = logging.getLogger(__name__)
     logger.info(f"[FramePack] total_second_length={params['total_second_length']}, total_latent_sections={total_latent_sections}")
@@ -237,7 +237,7 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
                 models['text_encoder'], models['text_encoder_2'], models['image_encoder'], models['vae'], models['transformer']
             )
         
-        # 文本編碼
+        # 開始Text Encoding
         progress.update(0, 'Text encoding ...')
         
         if not _high_vram:
@@ -246,15 +246,15 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
         
         llama_vec, clip_l_pooler = encode_prompt_conds(params['prompt'], models['text_encoder'], models['text_encoder_2'], models['tokenizer'], models['tokenizer_2'])
         
-        if params['cfg'] == 1:
+        if params['cfg'] == 1:# 如果cfg=1，則negative prompt無作用，設為空值
             llama_vec_n, clip_l_pooler_n = torch.zeros_like(llama_vec), torch.zeros_like(clip_l_pooler)
         else:
             llama_vec_n, clip_l_pooler_n = encode_prompt_conds(params['n_prompt'], models['text_encoder'], models['text_encoder_2'], models['tokenizer'], models['tokenizer_2'])
-        
+        # 將prompt編碼後的結果裁剪或填充到512個token
         llama_vec, llama_attention_mask = crop_or_pad_yield_mask(llama_vec, length=512)
         llama_vec_n, llama_attention_mask_n = crop_or_pad_yield_mask(llama_vec_n, length=512)
         
-        # 處理起始幀圖像
+        # 處理起始幀的圖片
         progress.update(0, 'Processing start frame ...')
         
         input_image = Image.open(start_image_path)
@@ -271,7 +271,7 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
             print(error_msg)
             raise ValueError(error_msg)
 
-        H, W, C = input_image_np.shape # 現在這行應該可以正常工作
+        H, W, C = input_image_np.shape 
         height, width = find_nearest_bucket(H, W, resolution=640)
         input_image_np = resize_and_center_crop(input_image_np, target_width=width, target_height=height)
         
@@ -305,7 +305,7 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
                 print(error_msg)
                 raise ValueError(error_msg)
 
-            H_end, W_end, C_end = end_image_np.shape # 現在這行應該可以正常工作
+            H_end, W_end, C_end = end_image_np.shape 
             
             end_image_np = resize_and_center_crop(end_image_np, target_width=width, target_height=height)
             
@@ -314,7 +314,7 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
             end_image_pt = torch.from_numpy(end_image_np).float() / 127.5 - 1
             end_image_pt = end_image_pt.permute(2, 0, 1)[None, :, None]
         
-        # VAE編碼
+        # VAE編碼起始跟結束的圖片
         progress.update(0, 'VAE encoding ...')
         
         if not _high_vram:
@@ -351,15 +351,18 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
         progress.update(0, 'Start sampling ...')
         
         rnd = torch.Generator("cpu").manual_seed(params['seed'])
+        # 每輪生成的pixel幀數
         num_frames = params['latent_window_size'] * 4 - 3
         
+        # 初始化latent的history，用於保存每輪生成的latent，BxCx(1+2+16)xH/8xW/8
         history_latents = torch.zeros(size=(1, 16, 1 + 2 + 16, height // 8, width // 8), dtype=torch.float32).cpu()
         history_pixels = None
         total_generated_latent_frames = 0
         
         # 將迭代器轉換為列表
         latent_paddings = list(reversed(range(total_latent_sections)))
-        
+        # 如果total_latent_sections = 4，則latent_paddings = [3, 2, 1, 0]
+
         if total_latent_sections > 4:
             # 理論上latent_paddings應該按照上面的序列，但當total_latent_sections > 4時
             # 複製一些項目看起來比擴展它更好
