@@ -30,3 +30,5 @@ dfloat11[cuda12]==0.5.0
 
 # git+https://github.com/IDEA-Research/GroundingDINO.git
 
+# 影片讀取、銜接
+imageio[ffmpeg]==2.37.2

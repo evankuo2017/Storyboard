@@ -22,7 +22,6 @@ import numpy as np
 from PIL import Image
 import torch
 import traceback
-import torchvision.io as tvio
 
 # FramePack 相關
 from framepack_start_end import process_video as framepack_process_video, unload_framepack
@@ -371,35 +370,6 @@ def process_video_task(task_id, start_image_path, end_image_path=None, params=No
             import tempfile
             output_filename = os.path.join(tempfile.gettempdir(), f"{task_id}.mp4")
         
-        # 嘗試尋找「時間上下一段」的影片，作為本段生成的歷史幀來源
-        # 例：本段是 1->2，則去找 2->3 這一段的影片，取其最前面 19 幀當歷史幀
-        prev_video_path = None
-        try:
-            if project_folder:
-                # task_id 格式預期為: video_{from_idx}_{to_idx}_timestamp
-                parts = os.path.basename(task_id).split("_")
-                if len(parts) >= 4 and parts[0] == "video":
-                    from_idx = int(parts[1])
-                    to_idx = int(parts[2])
-                    # 時間上「下一段」：to_idx -> to_idx + 1
-                    next_from = to_idx
-                    next_to = to_idx + 1
-                    prefix = f"video_{next_from}_{next_to}_"
-                    latest_file = None
-                    latest_mtime = None
-                    for fname in os.listdir(project_folder):
-                        if fname.startswith(prefix) and fname.endswith(".mp4"):
-                            fpath = os.path.join(project_folder, fname)
-                            mtime = os.path.getmtime(fpath)
-                            if latest_mtime is None or mtime > latest_mtime:
-                                latest_mtime = mtime
-                                latest_file = fpath
-                    if latest_file:
-                        prev_video_path = latest_file
-                        logger.info(f"找到時間上下一段影片作為歷史幀來源: {prev_video_path}")
-        except Exception as e:
-            logger.warning(f"尋找時間上下一段影片時發生錯誤: {e}")
-        
         # 使用 framepack（已在啟動時匯入函式；模型載入應由外部模組在呼叫時處理）
         if framepack_process_video:
             # 使用自定義進度回調來更新任務狀態
@@ -426,8 +396,7 @@ def process_video_task(task_id, start_image_path, end_image_path=None, params=No
                 gpu_memory_preservation=actual_params["gpu_memory_preservation"],
                 use_teacache=actual_params["use_teacache"],
                 mp4_crf=actual_params["mp4_crf"],
-                output=output_filename,
-                prev_video_path=prev_video_path
+                output=output_filename
             )
             
             if result:
@@ -537,10 +506,7 @@ def create_tasks_from_storyboard(storyboard_file):
         task_ids = []
         
         # 為每一對連續節點創建任務
-        # 關鍵：為了配合 FramePack 倒序生成，我們「從最後一段開始」入隊，
-        # 讓任務處理線程按照時間反向：最後一段 → 倒數第二段 → ... → 第一段
-        num_segments = len(nodes) - 1
-        for i in reversed(range(num_segments)):
+        for i in range(len(nodes) - 1):
             start_node = nodes[i]
             end_node = nodes[i + 1]
             
@@ -608,11 +574,11 @@ def create_tasks_from_storyboard(storyboard_file):
                 "created_at": datetime.now().isoformat()
             }
             
-            # 添加到任務隊列（倒序入隊，FIFO 處理即為從最後段開始）
+            # 添加到任務隊列
             task_queue.put(task)
             task_ids.append(task_id)
             
-            logger.info(f"創建任務 {task_id}，從節點 {i} 到節點 {i+1}（倒序入隊）")
+            logger.info(f"創建任務 {task_id}，從節點 {i} 到節點 {i+1}")
         
         return {"success": True, "task_ids": task_ids, "project_folder": project_folder}
         
@@ -918,9 +884,6 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                 }
 
                 data['segment_videos'] = segment_videos
-                # 偵測 final.mp4 是否存在，供前端在載入時顯示於最下方
-                final_mp4_path = os.path.join(project_folder_path, "final.mp4")
-                data['has_final_mp4'] = os.path.isfile(final_mp4_path)
                 
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
@@ -944,26 +907,20 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps(response_data).encode('utf-8'))
             return
         
-        # 視頻文件提供（支援專案資料夾結構；路徑可為 /video/檔名 或 /video/專案資料夾/檔名）
+        # 視頻文件提供（支援專案資料夾結構）
         elif path.startswith('/video/'):
-            rest = path.replace('/video/', '').lstrip('/')
-            parts = rest.split('/')
+            video_name = path.replace('/video/', '')
             video_path = None
-            if len(parts) == 2:
-                project_folder_name, video_name = parts
-                candidate = os.path.join(OUTPUT_DIR, project_folder_name, video_name)
-                if os.path.exists(candidate):
-                    video_path = candidate
-            if video_path is None:
-                video_name = rest if len(parts) <= 1 else parts[-1]
-                for item in os.listdir(OUTPUT_DIR):
-                    if 'nodes_' in item or item.startswith('storyboard_'):
-                        project_path = os.path.join(OUTPUT_DIR, item)
-                        if os.path.isdir(project_path):
-                            candidate_path = os.path.join(project_path, video_name)
-                            if os.path.exists(candidate_path):
-                                video_path = candidate_path
-                                break
+            
+            # 搜索專案資料夾中的影片文件（新格式：Xnodes_YYYYMMDD_HHMMSS 或舊格式：storyboard_YYYYMMDD_HHMMSS）
+            for item in os.listdir(OUTPUT_DIR):
+                if 'nodes_' in item or item.startswith('storyboard_'):
+                    project_path = os.path.join(OUTPUT_DIR, item)
+                    if os.path.isdir(project_path):
+                        candidate_path = os.path.join(project_path, video_name)
+                        if os.path.exists(candidate_path):
+                            video_path = candidate_path
+                            break
             
             if video_path and os.path.exists(video_path):
                 logger.info(f"提供影片檔案: {video_path}")
@@ -1309,7 +1266,7 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                     })
                     
                 self.wfile.write(response.encode('utf-8'))
-            
+                
             except Exception as e:
                 logger.error(f"重新生成影片請求時發生錯誤: {e}")
                 traceback.print_exc()
@@ -1322,112 +1279,6 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                     'message': str(e)
                 })
                 self.wfile.write(response.encode('utf-8'))
-        
-        # 串接所有片段影片為一支最終影片
-        elif self.path == '/concat_videos':
-            content_length = int(self.headers.get('Content-Length', '0'))
-            post_data = self.rfile.read(content_length) if content_length > 0 else b'{}'
-            
-            try:
-                data = json.loads(post_data.decode('utf-8') or '{}')
-                project_folder_value = data.get('project_folder')
-                
-                if not project_folder_value:
-                    raise ValueError("Missing 'project_folder' in request body")
-                
-                # 解析專案資料夾路徑（允許相對或絕對）
-                if os.path.isabs(project_folder_value):
-                    project_folder_path = project_folder_value
-                else:
-                    project_folder_path = os.path.join(OUTPUT_DIR, project_folder_value)
-                
-                if not os.path.isdir(project_folder_path):
-                    raise ValueError(f"Project folder does not exist: {project_folder_path}")
-                
-                # 找到專案中的 storyboard JSON 檔案（取最新修改時間）
-                json_files = [
-                    os.path.join(project_folder_path, f)
-                    for f in os.listdir(project_folder_path)
-                    if f.endswith('.json')
-                ]
-                if not json_files:
-                    raise ValueError(f"No storyboard JSON file found in project folder: {project_folder_path}")
-                storyboard_file = max(json_files, key=os.path.getmtime)
-                
-                with open(storyboard_file, 'r', encoding='utf-8') as f:
-                    storyboard_data = json.load(f)
-                
-                nodes = storyboard_data.get('nodes', [])
-                if len(nodes) < 2:
-                    raise ValueError("Storyboard needs at least 2 nodes to concat videos.")
-                
-                num_segments = len(nodes) - 1
-                
-                # 依序為每一段尋找最新的 segment 視頻
-                segment_paths = []
-                for i in range(num_segments):
-                    prefix = f"video_{i}_{i+1}_"
-                    latest_file = None
-                    latest_mtime = None
-                    for fname in os.listdir(project_folder_path):
-                        if fname.startswith(prefix) and fname.endswith('.mp4'):
-                            fpath = os.path.join(project_folder_path, fname)
-                            mtime = os.path.getmtime(fpath)
-                            if latest_mtime is None or mtime > latest_mtime:
-                                latest_mtime = mtime
-                                latest_file = fpath
-                    if latest_file is None:
-                        raise ValueError(f"Missing segment video for transition {i}->{i+1} in project '{project_folder_path}'")
-                    segment_paths.append(latest_file)
-                
-                if len(segment_paths) != num_segments:
-                    raise ValueError("Segment video count mismatch; cannot concat.")
-                
-                # 將單一 mp4 轉為 BxCxTxHxW 並對應到 [-1,1]
-                def read_video_to_bcthw(path):
-                    video, _, _ = tvio.read_video(path, pts_unit="sec")
-                    if video.numel() == 0:
-                        raise ValueError(f"Video file is empty or unreadable: {path}")
-                    video = video.float() / 127.5 - 1.0        # T,H,W,C
-                    video = video.permute(3, 0, 1, 2)          # C,T,H,W
-                    video = video.unsqueeze(0)                 # 1,C,T,H,W
-                    return video
-                
-                from diffusers_helper.utils import save_bcthw_as_mp4
-                
-                # 直接銜接：依序讀入各段並在時間維度上 cat，不做 overlap
-                parts = [read_video_to_bcthw(p) for p in segment_paths]
-                history = torch.cat(parts, dim=2)
-                
-                # 最終輸出檔案名稱：放在當前專案資料夾下，統一命名為 final.mp4
-                final_path = os.path.join(project_folder_path, "final.mp4")
-                save_bcthw_as_mp4(history, final_path, fps=30, crf=16)
-                
-                logger.info(f"Concat videos completed for project '{project_folder_path}', output: {final_path}")
-                
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                resp = {
-                    "status": "success",
-                    "message": "Concatenation completed",
-                    "file": os.path.basename(final_path)
-                }
-                self.wfile.write(json.dumps(resp).encode('utf-8'))
-            
-            except Exception as e:
-                logger.error(f"Error while concatenating videos: {e}")
-                traceback.print_exc()
-                self.send_response(500)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                resp = {
-                    "status": "error",
-                    "message": str(e)
-                }
-                self.wfile.write(json.dumps(resp).encode('utf-8'))
         
         # 新增：處理生成節點圖片的請求
         elif self.path == '/generate_node_image':

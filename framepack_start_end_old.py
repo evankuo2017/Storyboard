@@ -210,8 +210,6 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
         # 預覽模式：只生成最後一幀並輸出圖片
         'preview_last_only': False,
         'preview_image_output': None,
-        # 上一段影片路徑（若提供，會取其中 19 幀當作歷史幀）
-        'prev_video_path': None,
     }
     
     # 更新參數
@@ -220,8 +218,7 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
     # 創建進度回調
     progress = ProgressCallback(external_callback=progress_callback)
     
-    # 計算總區段數(影片要分成幾段) —— 完全沿用原始 FramePack 作法，
-    # 只根據使用者輸入的 total_second_length 來估算，不因橋接片段而改變。
+    # 計算總區段數(影片要分成幾段)
     total_latent_sections = (params['total_second_length'] * 30) / (params['latent_window_size'] * 4)
     total_latent_sections = int(max(round(total_latent_sections), 1)) # 四捨五入取整數，最少1段
     import logging
@@ -317,7 +314,7 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
             end_image_pt = torch.from_numpy(end_image_np).float() / 127.5 - 1
             end_image_pt = end_image_pt.permute(2, 0, 1)[None, :, None]
         
-        # VAE編碼起始、結束圖片與（可選）上一段影片橋接片段
+        # VAE編碼起始跟結束的圖片
         progress.update(0, 'VAE encoding ...')
         
         if not _high_vram:
@@ -328,44 +325,6 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
         if has_end_image:
             end_latent = vae_encode(end_image_pt, models['vae'])
         
-        # 橋接片段：從「下一個片段」讀取影片，取該片段「最前 19 幀」（與 end frame 同方式逐幀 encode）塞入歷史，bridge 優先於 end
-        bridge_history_latents = None  # 1,16,19,H/8,W/8，用於初始化 history_latents 前 19 格
-        prev_video_path = params.get('prev_video_path')
-        if prev_video_path:
-            try:
-                import imageio.v2 as imageio
-                progress.update(0, f'Loading previous video bridge segment from {os.path.basename(prev_video_path)} ...')
-                reader = imageio.get_reader(prev_video_path)
-                frames = []
-                max_bridge_frames = 33
-                for idx, frame in enumerate(reader):
-                    if idx >= max_bridge_frames:
-                        break
-                    if frame.ndim == 3 and frame.shape[-1] >= 3:
-                        frames.append(frame[..., :3])
-                reader.close()
-                
-                if len(frames) >= 19:
-                    processed = []
-                    for fr in frames:
-                        processed.append(resize_and_center_crop(fr, target_width=width, target_height=height))
-                    bridge_np = np.stack(processed, axis=0)  # T,H,W,3，索引 0 = 下一個片段第 1 幀
-                    bridge_pt = torch.from_numpy(bridge_np).float() / 127.5 - 1.0
-                    bridge_pt = bridge_pt.permute(0, 3, 1, 2).unsqueeze(0)  # 1,T,C,H,W
-                    bridge_pt = bridge_pt.permute(0, 2, 1, 3, 4)  # 1,C,T,H,W
-                    # 明確取「下一個片段最前 19 幀」i=0..18，逐幀 encode 後塞入歷史
-                    lat_list = []
-                    for i in range(19):
-                        one = vae_encode(bridge_pt[:, :, i : i + 1, :, :], models['vae'])
-                        lat_list.append(one.cpu().to(torch.float32))
-                    bridge_history_latents = torch.cat(lat_list, dim=2)  # 1,16,19,H/8,W/8
-                    print(f"前一段影片橋接片段已載入，19 幀 history latent 形狀: {bridge_history_latents.shape}")
-                else:
-                    print(f"警告: 前一段影片幀數不足 19，略過橋接。")
-            except Exception as e:
-                print(f"警告: 載入前一段影片橋接片段失敗 ({prev_video_path}): {e}")
-                traceback.print_exc()
-
         # CLIP視覺編碼
         progress.update(0, 'CLIP Vision encoding ...')
         
@@ -395,24 +354,23 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
         # 每輪生成的pixel幀數
         num_frames = params['latent_window_size'] * 4 - 3
         
-        # 初始化 latent 的 history，用於保存每輪生成的 latent，BxCx(1+2+16)xH/8xW/8
-        # 完全沿用原始 FramePack 結構：先建一個固定長度 1+2+16 的緩衝區，內容預設為 0。
+        # 初始化latent的history，用於保存每輪生成的latent，BxCx(1+2+16)xH/8xW/8
         history_latents = torch.zeros(size=(1, 16, 1 + 2 + 16, height // 8, width // 8), dtype=torch.float32).cpu()
         history_pixels = None
         total_generated_latent_frames = 0
         
-        # 有 bridge 時：將 33 幀中的 19 幀 encode 成的 latent 塞入 history（與 end frame 同方式），不改 padding、不預填像素
-        if bridge_history_latents is not None:
-            history_latents = bridge_history_latents.to(history_latents.dtype).cpu()
-        
-        # 完全沿用原本 padding 序列，不因 bridge 修改
+        # 將迭代器轉換為列表
         latent_paddings = list(reversed(range(total_latent_sections)))
-        if total_latent_sections > 4:
-            latent_paddings = [3] + [2] * (total_latent_sections - 3) + [1, 0]
+        # 如果total_latent_sections = 4，則latent_paddings = [3, 2, 1, 0]
 
-        for idx, latent_padding in enumerate(latent_paddings):
-            is_last_section = (idx == len(latent_paddings) - 1)
-            is_first_section = (idx == 0)
+        if total_latent_sections > 4:
+            # 理論上latent_paddings應該按照上面的序列，但當total_latent_sections > 4時
+            # 複製一些項目看起來比擴展它更好
+            latent_paddings = [3] + [2] * (total_latent_sections - 3) + [1, 0]
+        
+        for latent_padding in latent_paddings:
+            is_last_section = latent_padding == 0
+            is_first_section = latent_padding == latent_paddings[0]
             latent_padding_size = latent_padding * params['latent_window_size']
             
             print(f'latent_padding_size = {latent_padding_size}, is_last_section = {is_last_section}, is_first_section = {is_first_section}')
@@ -425,8 +383,8 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
             clean_latents_post, clean_latents_2x, clean_latents_4x = history_latents[:, :, :1 + 2 + 16, :, :].split([1, 2, 16], dim=2)
             clean_latents = torch.cat([clean_latents_pre, clean_latents_post], dim=2)
             
-            # 結束幀僅在第一區段塞入歷史；有 bridge 時優先使用 bridge 的 19 幀歷史，不覆蓋為 end
-            if has_end_image and is_first_section and bridge_history_latents is None:
+            # 如果提供了結束幀，則在第一個區段使用結束幀潛變量
+            if has_end_image and is_first_section:
                 clean_latents_post = end_latent.to(history_latents)
                 clean_latents = torch.cat([clean_latents_pre, clean_latents_post], dim=2)
             
@@ -523,7 +481,31 @@ def process_video(start_image_path, end_image_path=None, progress_callback=None,
                 import tempfile
                 output_filename = os.path.join(tempfile.gettempdir(), f'{job_id}.mp4')
             
-            
+            # 預覽模式：在第一個section（對應最後時間段）完成後立即輸出最後一幀
+            if params['preview_last_only'] and is_first_section:
+                # 直接輸出最後一幀為圖片
+                try:
+                    frame = history_pixels[0, :, -1, :, :]  # C,H,W
+                    frame = frame.clamp(-1, 1)
+                    frame = (frame + 1.0) / 2.0  # [0,1]
+                    frame = (frame * 255.0).round().byte().permute(1, 2, 0).cpu().numpy()
+                    img = Image.fromarray(frame)
+                    if params['preview_image_output']:
+                        img_out = params['preview_image_output']
+                    else:
+                        # 使用臨時目錄作為預覽圖片輸出
+                        import tempfile
+                        img_out = os.path.join(tempfile.gettempdir(), f'{job_id}_preview.png')
+                    img.save(img_out)
+                    print(f"預覽模式：在第一個section完成後立即輸出最後一幀到 {img_out}")
+                    
+                    # 單幀生成完成後釋放顯存
+                    unload_framepack()
+                    
+                    return img_out
+                except Exception as e:
+                    print(f"保存預覽單幀失敗: {e}")
+                    # 回退到保存視頻
 
             print(f"保存視頻到 {output_filename}...")
             save_bcthw_as_mp4(history_pixels, output_filename, fps=30, crf=params['mp4_crf'])
