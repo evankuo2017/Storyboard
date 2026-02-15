@@ -371,17 +371,14 @@ def process_video_task(task_id, start_image_path, end_image_path=None, params=No
             import tempfile
             output_filename = os.path.join(tempfile.gettempdir(), f"{task_id}.mp4")
         
-        # 嘗試尋找「時間上下一段」的影片，作為本段生成的歷史幀來源
-        # 例：本段是 1->2，則去找 2->3 這一段的影片，取其最前面 19 幀當歷史幀
+        # 倒序生成：本段 i->i+1 使用「時間上下一段」(i+1)->(i+2) 的影片，取其最前 19 幀當歷史幀
         prev_video_path = None
         try:
             if project_folder:
-                # task_id 格式預期為: video_{from_idx}_{to_idx}_timestamp
                 parts = os.path.basename(task_id).split("_")
                 if len(parts) >= 4 and parts[0] == "video":
                     from_idx = int(parts[1])
                     to_idx = int(parts[2])
-                    # 時間上「下一段」：to_idx -> to_idx + 1
                     next_from = to_idx
                     next_to = to_idx + 1
                     prefix = f"video_{next_from}_{next_to}_"
@@ -408,8 +405,8 @@ def process_video_task(task_id, start_image_path, end_image_path=None, params=No
                 task_status[task_id]["message"] = message
                 logger.info(f"任務 {task_id} 進度: {percentage}% - {message}")
             
-            # 調用framepack_start_end.py中的處理函數
-            logger.info(f"使用framepack_process_video處理任務 {task_id}")
+            # 調用 framepack_start_end 處理函數
+            logger.info(f"使用 framepack_start_end 處理任務 {task_id}")
             result = framepack_process_video(
                 start_image_path, 
                 end_image_path, 
@@ -534,17 +531,15 @@ def create_tasks_from_storyboard(storyboard_file):
             return {"success": False, "message": "Storyboard needs at least 2 nodes to generate videos."}
         
         # 獲取節點圖像路徑
-        task_ids = []
-        
-        # 為每一對連續節點創建任務
-        # 關鍵：為了配合 FramePack 倒序生成，我們「從最後一段開始」入隊，
-        # 讓任務處理線程按照時間反向：最後一段 → 倒數第二段 → ... → 第一段
+        # 為每一對連續節點創建任務（倒序入隊：最後一段先做，取時間上下一段最前 19 幀當歷史）
         num_segments = len(nodes) - 1
-        for i in reversed(range(num_segments)):
+        tasks_to_queue = []
+        task_ids_ordered = [None] * num_segments
+        
+        for i in range(num_segments):
             start_node = nodes[i]
             end_node = nodes[i + 1]
             
-            # 獲取圖像路徑 - 直接在專案的 images 資料夾中查找
             start_image_path = start_node.get("imagePath")
             if start_image_path:
                 start_image_path = os.path.join(project_image_folder, os.path.basename(start_image_path))
@@ -552,7 +547,6 @@ def create_tasks_from_storyboard(storyboard_file):
                     logger.error(f"無法找到節點 {i} 的圖片: {start_image_path}")
                     continue
             
-            # 處理結束節點圖像
             end_image_path = end_node.get("imagePath")
             if end_image_path:
                 end_image_path = os.path.join(project_image_folder, os.path.basename(end_image_path))
@@ -560,60 +554,54 @@ def create_tasks_from_storyboard(storyboard_file):
                     logger.warning(f"無法找到節點 {i+1} 的圖片: {end_image_path}")
                     end_image_path = None
             
-            # 查找對應的轉場描述
             transition_text = ""
             for transition in transitions:
                 if transition.get("from_node") == i and transition.get("to_node") == i + 1:
                     transition_text = transition.get("text", "")
                     break
             
-            # 設置任務參數 - 簡化命名方式，添加時間戳確保唯一性
             timestamp = datetime.now().strftime("%H%M%S")
             task_id = f"video_{i}_{i+1}_{timestamp}"
             
-            # 設置任務時長（基於節點時間差）
             time_range = None
             for transition in transitions:
                 if transition.get("from_node") == i and transition.get("to_node") == i + 1:
                     time_range = transition.get("time_range")
                     break
-            
-            second_length = 5  # 默認5秒
+            second_length = 5
             if time_range and len(time_range) >= 2:
                 second_length = max(1, time_range[1] - time_range[0])
             
-            # 獲取節點的 seed（使用結束節點的 seed，因為那是要生成的目標）
             node_seed = end_node.get("seed")
             if node_seed is None:
-                node_seed = default_params["seed"]  # 使用預設 seed 如果未指定
+                node_seed = default_params["seed"]
             
-            # 創建任務
             task = {
                 "id": task_id,
                 "start_image": start_image_path,
                 "end_image": end_image_path,
-                "project_folder": project_folder,  # 加入專案資料夾路徑
+                "project_folder": project_folder,
                 "params": {
                     "prompt": f"Character movement: {transition_text}" if transition_text else default_params["prompt"],
                     "total_second_length": second_length,
-                    "seed": node_seed  # 包含節點的 seed
+                    "seed": node_seed
                 }
             }
-            
-            # 初始化任務狀態
             task_status[task_id] = {
                 "status": "queued",
                 "progress": 0,
                 "message": "In queue",
                 "created_at": datetime.now().isoformat()
             }
-            
-            # 添加到任務隊列（倒序入隊，FIFO 處理即為從最後段開始）
+            tasks_to_queue.append((i, task_id, task))
+            task_ids_ordered[i] = task_id
+        
+        for i in reversed(range(num_segments)):
+            _, task_id, task = tasks_to_queue[i]
             task_queue.put(task)
-            task_ids.append(task_id)
-            
             logger.info(f"創建任務 {task_id}，從節點 {i} 到節點 {i+1}（倒序入隊）")
         
+        task_ids = [tid for tid in task_ids_ordered if tid is not None]
         return {"success": True, "task_ids": task_ids, "project_folder": project_folder}
         
     except Exception as e:

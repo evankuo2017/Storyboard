@@ -921,16 +921,10 @@
                             console.error("[State.processStoryboard] outputTextEl is null in fetch.then.");
                         }
                         
-                        // 在保存成功後詢問是否立即處理視頻
-                        const confirmProcess = confirm("Project created and storyboard saved successfully! Do you want to start processing the video now?");
-                        
-                        if (confirmProcess) {
-                            // 顯示處理狀態區域
-                            document.getElementById('processing-status-container').style.display = 'block';
-                            
-                            // 開始處理視頻，使用專案資料夾名稱
-                            this.startVideoProcessing(data.project_folder);
-                        }
+                        // 建立專案後自動開始每個任務的生成（與以前一樣）
+                        const statusContainer = document.getElementById('processing-status-container');
+                        if (statusContainer) statusContainer.style.display = 'block';
+                        this.startVideoProcessing(data.project_folder);
                     })
                     .catch(error => {
                         console.error('Error:', error);
@@ -1104,8 +1098,11 @@
                         const fromNode = i;
                         const toNode = i + 1;
                         const seg = Array.isArray(this.segmentVideos) ? this.segmentVideos.find(s => s.from === fromNode && s.to === toNode) : null;
-                        const taskId = seg ? seg.task_id : `video_${fromNode}_${toNode}_generate`;
-                        const task = seg ? tasks[seg.task_id] : null;
+                        // 優先使用 this.taskIds[i] 以顯示 server 回傳的 queued/processing 等即時狀態
+                        const taskId = (Array.isArray(this.taskIds) && i < this.taskIds.length)
+                            ? this.taskIds[i]
+                            : (seg ? seg.task_id : `video_${fromNode}_${toNode}_generate`);
+                        const task = tasks[taskId] !== undefined ? tasks[taskId] : null;
                         
                         const row = document.createElement('tr');
                         
@@ -1155,6 +1152,12 @@
                         regenerateButton.style.backgroundColor = '#28a745';
                         regenerateButton.style.marginRight = '5px';
                         regenerateButton.onclick = () => { this.regenerateVideo(taskId); };
+                        const isGenerating = task && (task.status === 'processing' || task.status === 'queued');
+                        if (isGenerating) {
+                            regenerateButton.disabled = true;
+                            regenerateButton.style.opacity = '0.6';
+                            regenerateButton.style.cursor = 'not-allowed';
+                        }
                         actionCell.appendChild(regenerateButton);
                         
                         if (task && task.status === 'completed' && task.output_file) {
