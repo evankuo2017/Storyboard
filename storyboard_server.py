@@ -25,7 +25,7 @@ import traceback
 import torchvision.io as tvio
 
 # FramePack 相關
-from framepack_start_end import process_video as framepack_process_video, unload_framepack
+from framepack_start_end import process_video as framepack_process_video, process_storyboard_continuous, unload_framepack
 
 # Qwen 相關（分類、框選、縮圖比例分析）
 from Qwen_inference import (
@@ -330,18 +330,8 @@ def create_tasks_from_nodes_and_transitions_direct(nodes, transitions, project_f
         return {"success": False, "message": f"Error creating regeneration tasks: {str(e)}"}
 
 
-# 模擬 FramePack 處理函數
+"""
 def process_video_task(task_id, start_image_path, end_image_path=None, params=None, project_folder=None):
-    """
-    處理視頻生成任務
-    
-    Args:
-        task_id: 任務ID
-        start_image_path: 起始幀圖片路徑
-        end_image_path: 結束幀圖片路徑 (可選)
-        params: 其他參數字典
-        project_folder: 專案資料夾路徑
-    """
     global task_status
     
     try:
@@ -453,6 +443,7 @@ def process_video_task(task_id, start_image_path, end_image_path=None, params=No
         task_status[task_id]["status"] = "error"
         task_status[task_id]["message"] = f"錯誤: {str(e)}"
         return None
+"""
 
 # 任務處理線程
 def task_processor():
@@ -502,7 +493,149 @@ def task_processor():
     
     logger.info("任務處理線程已停止")
 
+
 # 從故事板JSON生成任務
+def start_continuous_generation(storyboard_file):
+    """
+    啟動連續生成流程（在單獨線程中運行）
+    
+    Args:
+        storyboard_file: JSON文件路徑
+    
+    Returns:
+        任務ID和專案資料夾
+    """
+    try:
+        with open(storyboard_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        nodes = data.get("nodes", [])
+        transitions = data.get("transitions", [])
+        
+        project_folder = os.path.dirname(storyboard_file)
+        project_image_folder = os.path.join(project_folder, "images")
+        
+        if len(nodes) < 2:
+            return {"success": False, "message": "Storyboard needs at least 2 nodes to generate videos."}
+        
+        # 構建所有片段的信息
+        num_segments = len(nodes) - 1
+        segments = []
+        
+        for i in range(num_segments):
+            start_node = nodes[i]
+            end_node = nodes[i + 1]
+            
+            start_image_path = start_node.get("imagePath")
+            if start_image_path:
+                start_image_path = os.path.join(project_image_folder, os.path.basename(start_image_path))
+                if not os.path.exists(start_image_path):
+                    logger.error(f"無法找到節點 {i} 的圖片: {start_image_path}")
+                    continue
+            
+            end_image_path = end_node.get("imagePath")
+            if end_image_path:
+                end_image_path = os.path.join(project_image_folder, os.path.basename(end_image_path))
+                if not os.path.exists(end_image_path):
+                    logger.warning(f"無法找到節點 {i+1} 的圖片: {end_image_path}")
+                    end_image_path = None
+            
+            transition_text = ""
+            for transition in transitions:
+                if transition.get("from_node") == i and transition.get("to_node") == i + 1:
+                    transition_text = transition.get("text", "")
+                    break
+            
+            time_range = None
+            for transition in transitions:
+                if transition.get("from_node") == i and transition.get("to_node") == i + 1:
+                    time_range = transition.get("time_range")
+                    break
+            
+            second_length = 5
+            if time_range and len(time_range) >= 2:
+                second_length = max(1, time_range[1] - time_range[0])
+            
+            node_seed = end_node.get("seed")
+            if node_seed is None:
+                node_seed = default_params["seed"]
+            
+            timestamp = datetime.now().strftime("%H%M%S")
+            output_path = os.path.join(project_folder, f"video_{i}_{i+1}_{timestamp}.mp4")
+            
+            segments.append({
+                "start_image_path": start_image_path,
+                "end_image_path": end_image_path,
+                "prompt": f"Character movement: {transition_text}" if transition_text else default_params["prompt"],
+                "seed": node_seed,
+                "total_second_length": second_length,
+                "output_path": output_path
+            })
+        
+        # 創建一個特殊的任務ID來追踪整體進度
+        task_id = f"continuous_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        task_status[task_id] = {
+            "status": "processing",
+            "progress": 0,
+            "message": "開始連續生成...",
+            "created_at": datetime.now().isoformat(),
+            "total_segments": num_segments,
+            "current_segment": -1
+        }
+        
+        # 啟動線程執行連續生成
+        def run_continuous_generation():
+            try:
+                def progress_callback(segment_idx, percentage, message):
+                    task_status[task_id].update({
+                        "status": "processing",
+                        "progress": percentage,
+                        "message": message,
+                        "current_segment": segment_idx
+                    })
+                
+                final_path = process_storyboard_continuous(segments, project_folder, progress_callback)
+                
+                if final_path:
+                    task_status[task_id].update({
+                        "status": "completed",
+                        "progress": 100,
+                        "message": "全部完成",
+                        "output_file": os.path.basename(final_path)
+                    })
+                    logger.info(f"連續生成完成: {final_path}")
+                else:
+                    task_status[task_id].update({
+                        "status": "error",
+                        "message": "生成失敗"
+                    })
+                    logger.error("連續生成失敗")
+                    
+            except Exception as e:
+                task_status[task_id].update({
+                    "status": "error",
+                    "message": str(e)
+                })
+                logger.error(f"連續生成過程中發生錯誤: {e}")
+                traceback.print_exc()
+        
+        thread = threading.Thread(target=run_continuous_generation, daemon=True)
+        thread.start()
+        
+        return {
+            "success": True,
+            "task_id": task_id,
+            "project_folder": os.path.basename(project_folder),
+            "num_segments": num_segments
+        }
+        
+    except Exception as e:
+        logger.error(f"啟動連續生成時出錯: {e}")
+        traceback.print_exc()
+        return {"success": False, "message": f"Error starting continuous generation: {str(e)}"}
+
+
 def create_tasks_from_storyboard(storyboard_file):
     """
     從故事板JSON文件生成視頻處理任務
@@ -1176,8 +1309,8 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                     json.dump(storyboard_data, f, ensure_ascii=False, indent=2)
                 logger.info(f"保存 JSON 到專案: {project_json_path}")
                 
-                # 現在使用專案中的 JSON 創建任務
-                result = create_tasks_from_storyboard(project_json_path)
+                # 使用新的連續生成流程
+                result = start_continuous_generation(project_json_path)
                 
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
@@ -1187,8 +1320,8 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 if result.get("success", False):
                     response = json.dumps({
                         'status': 'success',
-                        'message': f'Created {len(result["task_ids"])} video tasks',
-                        'task_ids': result["task_ids"],
+                        'message': f'Started continuous generation for {result["num_segments"]} segments',
+                        'task_id': result["task_id"],
                         'project_folder': project_folder
                     })
                 else:

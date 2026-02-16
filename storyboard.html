@@ -539,7 +539,7 @@
         <div style="margin-top: 30px; display: flex; gap: 10px; justify-content: center;">
             <button id="load-storyboard-btn" class="button-primary" style="padding: 15px 30px; font-size: 16px; min-width: 200px;">Load Storyboard</button>
             <button id="process-btn" class="button-primary" style="padding: 15px 30px; font-size: 16px; min-width: 200px;">Create Storyboard</button>
-            <button id="concat-videos-btn" class="button-primary" style="padding: 15px 30px; font-size: 16px; min-width: 200px; background-color: #455a64;" disabled>Concat videos</button>
+            <!-- Concat按鈕已移除：連續生成會自動產生 final.mp4 -->
         </div>
 
         <!-- 修改處理狀態區域，刪除刷新按鈕 -->
@@ -566,10 +566,10 @@
             </div>
         </div>
 
-        <!-- UI 最下方預留空白區，銜接完成後在此顯示最終影片（不用彈窗） -->
+        <!-- UI 最下方預留空白區，生成完成後在此顯示最終影片 -->
         <div id="final-video-container" style="margin-top: 30px; min-height: 120px; padding: 15px; background: #f5f5f5; border-radius: 8px;">
-            <h2 style="margin-top: 0;">Final Video (Concatenated)</h2>
-            <p id="final-video-placeholder" style="color: #666; margin: 10px 0;">影片銜接完成後會顯示於此。</p>
+            <h2 style="margin-top: 0;">最終影片</h2>
+            <p id="final-video-placeholder" style="color: #666; margin: 10px 0;">影片生成完成後會顯示於此。</p>
             <video id="final-video-player" controls style="max-width: 100%; max-height: 70vh; background: #000; display: none;"></video>
         </div>
     </div>
@@ -589,7 +589,8 @@
                 nodes: [],                // Array of all nodes in the storyboard
                 currentNodeIndex: 0,      // Index of the currently selected node
                 zoom: 1,                  // Current zoom level of the timeline
-                taskIds: [],              // 存儲已提交的任務ID
+                taskIds: [],              // 存儲已提交的任務ID（舊架構）
+                continuousTaskId: null,   // 連續生成的任務ID（新架構）
                 segmentVideos: [],        // 從後端載入的各段落影片資訊
                 currentProjectFolder: null, // 當前專案資料夾名稱
                 
@@ -974,11 +975,12 @@
                             const el = document.getElementById('output-text');
                             if (el) {
                                 const projectInfo = data.project_folder ? `\n專案資料夾: ${data.project_folder}` : '';
-                                el.value += `\n\nSubmitted ${data.task_ids.length} video processing tasks.${projectInfo}`;
+                                el.value += `\n\n開始連續生成 ${data.num_segments || 0} 個片段...${projectInfo}`;
                             } else {
                                 console.error("[State.startVideoProcessing] outputTextEl is null when submitting tasks.");
                             }
-                            this.taskIds = data.task_ids;
+                            // 儲存單一任務ID
+                            this.continuousTaskId = data.task_id;
                             this.currentProjectFolder = data.project_folder; // 儲存專案資料夾信息
                             
                             // 顯示專案資料夾信息
@@ -1052,8 +1054,8 @@
                 
                 // 更新任務狀態
                 updateTaskStatus() {
-                    // 如果沒有任務，則不需要查詢
-                    if (this.taskIds.length === 0) {
+                    // 如果沒有連續任務ID，則不需要查詢
+                    if (!this.continuousTaskId) {
                         return;
                     }
                     
@@ -1070,15 +1072,29 @@
                         if (data.status === 'success' && data.tasks) {
                             this.renderTaskStatus(data.tasks);
                             
-                            // 檢查是否所有任務都已完成
-                            const allCompleted = this.taskIds.every(taskId => {
-                                const task = data.tasks[taskId];
-                                return task && (task.status === 'completed' || task.status === 'error' || task.status === 'cancelled');
-                            });
-                            
-                            if (allCompleted) {
-                                console.log('All tasks completed');
+                            // 檢查連續任務是否完成
+                            const task = data.tasks[this.continuousTaskId];
+                            if (task && (task.status === 'completed' || task.status === 'error')) {
+                                console.log('Continuous generation completed');
                                 this.stopTaskStatusPolling();
+                                
+                                // 如果成功完成，直接顯示 final.mp4
+                                if (task.status === 'completed' && this.currentProjectFolder && task.output_file) {
+                                    const placeholderEl = document.getElementById('final-video-placeholder');
+                                    const playerEl = document.getElementById('final-video-player');
+                                    
+                                    if (playerEl) {
+                                        const videoUrl = `/video/${encodeURIComponent(this.currentProjectFolder)}/${task.output_file}`;
+                                        playerEl.src = videoUrl + '?t=' + Date.now();
+                                        playerEl.style.display = 'block';
+                                        playerEl.load();
+                                        console.log(`Final video displayed: ${videoUrl}`);
+                                    }
+                                    
+                                    if (placeholderEl) {
+                                        placeholderEl.style.display = 'none';
+                                    }
+                                }
                             }
                         }
                     })
@@ -1087,91 +1103,71 @@
                     });
                 },
                 
-                // 渲染任務狀態：依「每個片段」一列；有影片時顯示 View + Regenerate，缺影片時只顯示 Regenerate
+                // 渲染任務狀態：顯示連續生成的整體進度
                 renderTaskStatus(tasks) {
                     const statusTableBody = document.getElementById('task-status-body');
                     if (!statusTableBody) return;
                     statusTableBody.innerHTML = '';
                     
-                    const requiredSegments = Math.max(0, this.nodes.length - 1);
-                    for (let i = 0; i < requiredSegments; i++) {
-                        const fromNode = i;
-                        const toNode = i + 1;
-                        const seg = Array.isArray(this.segmentVideos) ? this.segmentVideos.find(s => s.from === fromNode && s.to === toNode) : null;
-                        // 優先使用 this.taskIds[i] 以顯示 server 回傳的 queued/processing 等即時狀態
-                        const taskId = (Array.isArray(this.taskIds) && i < this.taskIds.length)
-                            ? this.taskIds[i]
-                            : (seg ? seg.task_id : `video_${fromNode}_${toNode}_generate`);
-                        const task = tasks[taskId] !== undefined ? tasks[taskId] : null;
+                    if (!this.continuousTaskId) return;
+                    
+                    const task = tasks[this.continuousTaskId];
+                    if (!task) return;
+                    
+                    const row = document.createElement('tr');
+                    
+                    const idCell = document.createElement('td');
+                    idCell.textContent = '連續生成';
+                    row.appendChild(idCell);
+                    
+                    const statusCell = document.createElement('td');
+                    statusCell.textContent = this.getStatusText(task.status);
+                    statusCell.style.color = this.getStatusColor(task.status);
+                    row.appendChild(statusCell);
+                    
+                    const progressCell = document.createElement('td');
+                    if (task.status === 'processing') {
+                        const progressBar = document.createElement('div');
+                        progressBar.className = 'progress-bar';
+                        progressBar.style.width = '100%';
+                        progressBar.style.height = '20px';
+                        progressBar.style.backgroundColor = '#f0f0f0';
+                        progressBar.style.borderRadius = '4px';
+                        progressBar.style.overflow = 'hidden';
+                        const progressIndicator = document.createElement('div');
+                        progressIndicator.style.width = `${task.progress}%`;
+                        progressIndicator.style.height = '100%';
+                        progressIndicator.style.backgroundColor = '#4361ee';
+                        progressIndicator.style.transition = 'width 0.3s ease';
+                        progressBar.appendChild(progressIndicator);
+                        progressCell.appendChild(progressBar);
                         
-                        const row = document.createElement('tr');
-                        
-                        const idCell = document.createElement('td');
-                        idCell.textContent = taskId;
-                        row.appendChild(idCell);
-                        
-                        const statusCell = document.createElement('td');
-                        if (task) {
-                            statusCell.textContent = this.getStatusText(task.status);
-                            statusCell.style.color = this.getStatusColor(task.status);
-                        } else {
-                            statusCell.textContent = seg ? '載入中…' : '未生成';
-                            statusCell.style.color = '#6c757d';
+                        // 顯示當前片段
+                        if (task.current_segment >= 0 && task.total_segments) {
+                            const segInfo = document.createElement('div');
+                            segInfo.textContent = `片段 ${task.current_segment + 1}/${task.total_segments}`;
+                            segInfo.style.fontSize = '12px';
+                            segInfo.style.marginTop = '4px';
+                            progressCell.appendChild(segInfo);
                         }
-                        row.appendChild(statusCell);
-                        
-                        const progressCell = document.createElement('td');
-                        if (task && task.status === 'processing') {
-                            const progressBar = document.createElement('div');
-                            progressBar.className = 'progress-bar';
-                            progressBar.style.width = '100%';
-                            progressBar.style.height = '20px';
-                            progressBar.style.backgroundColor = '#f0f0f0';
-                            progressBar.style.borderRadius = '4px';
-                            progressBar.style.overflow = 'hidden';
-                            const progressIndicator = document.createElement('div');
-                            progressIndicator.style.width = `${task.progress}%`;
-                            progressIndicator.style.height = '100%';
-                            progressIndicator.style.backgroundColor = '#4361ee';
-                            progressIndicator.style.transition = 'width 0.3s ease';
-                            progressBar.appendChild(progressIndicator);
-                            progressCell.appendChild(progressBar);
-                        } else {
-                            progressCell.textContent = task ? `${task.progress}%` : '-';
-                        }
-                        row.appendChild(progressCell);
-                        
-                        const messageCell = document.createElement('td');
-                        messageCell.textContent = task ? (task.message || '') : '';
-                        row.appendChild(messageCell);
-                        
-                        const actionCell = document.createElement('td');
-                        const regenerateButton = document.createElement('button');
-                        regenerateButton.className = 'button-primary';
-                        regenerateButton.textContent = 'Regenerate';
-                        regenerateButton.style.backgroundColor = '#28a745';
-                        regenerateButton.style.marginRight = '5px';
-                        regenerateButton.onclick = () => { this.regenerateVideo(taskId); };
-                        const isGenerating = task && (task.status === 'processing' || task.status === 'queued');
-                        if (isGenerating) {
-                            regenerateButton.disabled = true;
-                            regenerateButton.style.opacity = '0.6';
-                            regenerateButton.style.cursor = 'not-allowed';
-                        }
-                        actionCell.appendChild(regenerateButton);
-                        
-                        if (task && task.status === 'completed' && task.output_file) {
-                            const viewButton = document.createElement('button');
-                            viewButton.className = 'button-primary';
-                            viewButton.textContent = 'View';
-                            viewButton.style.marginRight = '5px';
-                            viewButton.onclick = () => { this.viewVideoResult(task.output_file); };
-                            actionCell.insertBefore(viewButton, regenerateButton);
-                        }
-                        
-                        row.appendChild(actionCell);
-                        statusTableBody.appendChild(row);
+                    } else {
+                        progressCell.textContent = `${task.progress}%`;
                     }
+                    row.appendChild(progressCell);
+                    
+                    const messageCell = document.createElement('td');
+                    messageCell.textContent = task.message || '';
+                    row.appendChild(messageCell);
+                    
+                    const actionCell = document.createElement('td');
+                    // 完成後會自動在下方影片框顯示，不需要 View 按鈕
+                    if (task.status === 'completed') {
+                        actionCell.textContent = '✓ 影片已顯示在下方';
+                        actionCell.style.color = '#2a9d8f';
+                    }
+                    row.appendChild(actionCell);
+                    
+                    statusTableBody.appendChild(row);
                 },
                 
                 // 獲取狀態文字
@@ -1196,6 +1192,45 @@
                         case 'cancelled': return '#fca311'; // 黃色
                         default: return '#212529'; // 黑色
                     }
+                },
+                
+                // 載入專案並顯示 final.mp4（如果存在）
+                loadStoryboard(projectFolder) {
+                    console.log(`Loading storyboard for project: ${projectFolder}`);
+                    
+                    fetch(`/load_storyboard?file=${encodeURIComponent(projectFolder)}`)
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error(`Failed to load storyboard: ${response.statusText}`);
+                            }
+                            return response.json();
+                        })
+                        .then(storyboardData => {
+                            // 檢查是否有 final.mp4
+                            const hasFinalMp4 = !!storyboardData.has_final_mp4;
+                            const placeholderEl = document.getElementById('final-video-placeholder');
+                            const playerEl = document.getElementById('final-video-player');
+                            
+                            if (hasFinalMp4 && playerEl && projectFolder) {
+                                // 顯示 final.mp4
+                                const videoUrl = `/video/${encodeURIComponent(projectFolder)}/final.mp4`;
+                                playerEl.src = videoUrl + '?t=' + Date.now();
+                                playerEl.style.display = 'block';
+                                if (placeholderEl) placeholderEl.style.display = 'none';
+                                console.log(`Final video loaded: ${videoUrl}`);
+                            } else {
+                                // 沒有 final.mp4
+                                if (playerEl) playerEl.style.display = 'none';
+                                if (placeholderEl) {
+                                    placeholderEl.style.display = 'block';
+                                    placeholderEl.textContent = '影片生成完成後會顯示於此。';
+                                    placeholderEl.style.color = '#666';
+                                }
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error loading storyboard:', error);
+                        });
                 },
                 
                 // 查看視頻結果
