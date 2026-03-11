@@ -11,11 +11,8 @@ import webbrowser
 import threading
 import time
 import mimetypes
-import subprocess
-import queue
 import uuid
 import sys
-import random
 import tempfile
 import shutil
 import numpy as np
@@ -25,7 +22,7 @@ import traceback
 import torchvision.io as tvio
 
 # FramePack 相關
-from framepack_start_end import process_video as framepack_process_video, process_storyboard_continuous, unload_framepack
+from framepack_start_end import process_storyboard_continuous, unload_framepack
 
 # Qwen 相關（分類、框選、縮圖比例分析）
 from Qwen_inference import (
@@ -77,10 +74,8 @@ def create_project_structure(project_folder):
     os.makedirs(image_folder, exist_ok=True)
     return image_folder
 
-# 任務隊列和處理狀態
-task_queue = queue.Queue()
+# 任務處理狀態
 task_status = {}  # 存儲任務狀態的字典
-stop_processing = False
 preview_jobs = {}
 preview_cancel_flags = {}
 
@@ -102,399 +97,6 @@ default_params = {
     "mp4_crf": 16
 }
 
-def create_tasks_from_nodes_and_transitions_direct(nodes, transitions, project_folder, target_pairs=None):
-    """
-    直接從節點和轉場數據創建視頻處理任務（用於重新生成）
-    
-    Args:
-        nodes: 節點數據列表
-        transitions: 轉場數據列表
-        project_folder: 現有的專案資料夾路徑
-        target_pairs: 指定要處理的節點對列表 [(from_idx, to_idx), ...]，若為 None 則處理全部
-    
-    Returns:
-        添加的任務ID列表，或錯誤信息
-    """
-    try:
-        job_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        project_image_folder = os.path.join(project_folder, "images")
-        if len(nodes) < 2:
-            error_msg = f"節點少於2個，無法創建任務"
-            logger.warning(error_msg)
-            return {"success": False, "message": "需要至少2個節點才能生成影片。"}
-        
-        if target_pairs is not None:
-            target_pair_set = {tuple(pair) for pair in target_pairs}
-            relevant_indices = {idx for pair in target_pair_set for idx in pair}
-        else:
-            target_pair_set = None
-            relevant_indices = set(range(len(nodes)))
-        
-        # 檢查所有節點是否都有圖片
-        logger.info(f"檢查重生任務的圖片，專案圖片資料夾: {project_image_folder}")
-        
-        # 列出專案圖片資料夾中的所有文件
-        if os.path.exists(project_image_folder):
-            available_images = os.listdir(project_image_folder)
-            logger.info(f"專案圖片資料夾中的文件: {available_images}")
-        else:
-            logger.error(f"專案圖片資料夾不存在: {project_image_folder}")
-            return {"success": False, "message": f"專案圖片資料夾不存在: {project_image_folder}"}
-        
-        missing_images = []
-        node_image_paths = {}  # 儲存每個節點的實際圖片路徑
-        
-        for i, node in enumerate(nodes):
-            if i not in relevant_indices:
-                continue
-            has_image = node.get("hasImage", False)
-            image_path = node.get("imagePath")
-            
-            logger.info(f"檢查節點 {i}: hasImage={has_image}, imagePath={image_path}")
-            
-            if not has_image:
-                missing_images.append(i)
-                logger.warning(f"節點 {i} 標記為沒有圖片")
-                continue
-            
-            # 嘗試多種方式找到圖片文件
-            found_image = None
-            
-            # 方法1: 如果提供了 imagePath，嘗試使用它
-            if image_path:
-                # 嘗試直接使用 imagePath（可能是文件名）
-                full_path = os.path.join(project_image_folder, os.path.basename(image_path))
-                if os.path.exists(full_path):
-                    found_image = full_path
-                    logger.info(f"節點 {i} 找到圖片（方法1-basename）: {full_path}")
-                else:
-                    # 嘗試直接使用 imagePath
-                    alt_path = os.path.join(project_image_folder, image_path)
-                    if os.path.exists(alt_path):
-                        found_image = alt_path
-                        logger.info(f"節點 {i} 找到圖片（方法1-direct）: {alt_path}")
-            
-            # 方法2: 如果還沒找到，嘗試常見的命名模式
-            if not found_image:
-                common_patterns = [
-                    f"node_{i}.png",
-                    f"node_{i}.jpg",
-                    f"node_{i}.jpeg",
-                    f"{i}.png",
-                    f"{i}.jpg",
-                    f"{i}.jpeg"
-                ]
-                
-                for pattern in common_patterns:
-                    test_path = os.path.join(project_image_folder, pattern)
-                    if os.path.exists(test_path):
-                        found_image = test_path
-                        logger.info(f"節點 {i} 找到圖片（方法2-pattern）: {found_image}")
-                        break
-            
-            # 方法3: 如果還沒找到，按索引順序查找圖片文件
-            if not found_image:
-                image_files = [f for f in available_images if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-                image_files.sort()  # 確保順序一致
-                
-                if i < len(image_files):
-                    found_image = os.path.join(project_image_folder, image_files[i])
-                    logger.info(f"節點 {i} 找到圖片（方法3-index）: {found_image}")
-            
-            if found_image:
-                node_image_paths[i] = found_image
-                logger.info(f"節點 {i} 最終使用圖片: {found_image}")
-            else:
-                missing_images.append(i)
-                logger.warning(f"節點 {i} 找不到任何圖片文件")
-        
-        if missing_images:
-            error_msg = f"節點 {missing_images} 缺少圖片文件"
-            logger.error(error_msg)
-            return {"success": False, "message": f"節點 {missing_images} 缺少圖片文件"}
-        
-        task_ids = []
-        
-        # 為指定的節點對創建任務（未指定則處理全部）
-        for i in range(len(nodes) - 1):
-            pair = (i, i + 1)
-            if target_pair_set is not None and pair not in target_pair_set:
-                continue
-            
-            start_node = nodes[i]
-            end_node = nodes[i + 1]
-            
-            # 使用我們之前找到的實際圖片路徑
-            start_image_path = node_image_paths.get(i)
-            end_image_path = node_image_paths.get(i + 1)
-            
-            if not start_image_path or not end_image_path:
-                logger.error(f"無法找到節點 {i} 或 {i+1} 的圖片路徑")
-                continue
-            
-            logger.info(f"重生任務 {i}->{i+1}: 起始圖片={start_image_path}, 結束圖片={end_image_path}")
-            
-            # 查找對應的轉場描述
-            transition_text = ""
-            for transition in transitions:
-                if transition.get("from_node") == i and transition.get("to_node") == i + 1:
-                    transition_text = transition.get("text", "")
-                    break
-            
-            # 重生時重用現有的 task ID，而不是創建新的
-            # 查找現有的 task ID
-            existing_task_id = None
-            if os.path.exists(project_folder):
-                for filename in os.listdir(project_folder):
-                    if filename.startswith(f"video_{i}_{i+1}_") and filename.endswith('.mp4'):
-                        existing_task_id = filename[:-4]  # 移除 .mp4 擴展名
-                        logger.info(f"找到現有任務 ID: {existing_task_id}")
-                        break
-            
-            # 如果找不到現有任務，創建新的
-            if existing_task_id:
-                task_id = existing_task_id
-                logger.info(f"重用現有任務 ID: {task_id}")
-            else:
-                timestamp = datetime.now().strftime("%H%M%S")
-                task_id = f"video_{i}_{i+1}_{timestamp}"
-                logger.info(f"創建新任務 ID: {task_id}")
-            
-            # 設置任務時長（基於節點時間差）
-            time_range = None
-            for transition in transitions:
-                if transition.get("from_node") == i and transition.get("to_node") == i + 1:
-                    time_range = transition.get("time_range")
-                    break
-            
-            second_length = 5  # 默認5秒
-            if time_range and len(time_range) >= 2:
-                second_length = max(0.1, float(time_range[1]) - float(time_range[0]))
-            
-            # 獲取 seed（從結束節點）
-            seed = end_node.get("seed", default_params["seed"])
-            if seed is None:
-                seed = random.randint(0, 2147483647)
-            
-            logger.info(f"創建重新生成任務 {task_id}: {start_image_path} -> {end_image_path}")
-            logger.info(f"  轉場描述: '{transition_text}'")
-            logger.info(f"  時長: {second_length} 秒")
-            logger.info(f"  Seed: {seed}")
-            
-            # 創建任務字典（與正常處理流程保持一致）
-            # 重生任務會直接覆蓋現有文件，不需要額外的刪除操作
-            task = {
-                "id": task_id,
-                "start_image": start_image_path,
-                "end_image": end_image_path,
-                "project_folder": project_folder,
-                "is_regenerate": True,  # 標記為重生任務
-                "params": {
-                    "prompt": transition_text,
-                    "seed": seed,
-                    "second_length": second_length
-                }
-            }
-            
-            # 將任務添加到隊列
-            task_queue.put(task)
-            
-            task_ids.append(task_id)
-            
-            # 初始化或更新任務狀態
-            if task_id in task_status:
-                # 如果任務已存在（重生情況），更新狀態但保留輸出文件信息
-                existing_output = task_status[task_id].get("output_file")
-                task_status[task_id] = {
-                    "status": "pending",
-                    "message": f"重生任務已創建，等待處理",
-                    "progress": 0,
-                    "output_file": existing_output  # 保留現有的輸出文件
-                }
-                logger.info(f"更新現有任務狀態: {task_id}")
-            else:
-                # 新任務
-                task_status[task_id] = {
-                    "status": "pending", 
-                    "message": f"任務已創建，等待處理",
-                    "progress": 0
-                }
-                logger.info(f"創建新任務狀態: {task_id}")
-        
-        logger.info(f"成功創建 {len(task_ids)} 個重新生成任務")
-        return {"success": True, "task_ids": task_ids}
-        
-    except Exception as e:
-        logger.error(f"創建重新生成任務時發生錯誤: {e}")
-        traceback.print_exc()
-        return {"success": False, "message": f"Error creating regeneration tasks: {str(e)}"}
-
-
-"""
-def process_video_task(task_id, start_image_path, end_image_path=None, params=None, project_folder=None):
-    global task_status
-    
-    try:
-        task_status[task_id]["status"] = "processing"
-        task_status[task_id]["progress"] = 0
-        task_status[task_id]["message"] = "啟動處理任務..."
-        
-        # 合併默認參數和提供的參數
-        if params is None:
-            params = {}
-        actual_params = default_params.copy()
-        actual_params.update(params)
-        
-        logger.info(f"開始處理任務 {task_id}，起始幀：{start_image_path}, 結束幀：{end_image_path}")
-        
-        # 檢查是否應該停止處理
-        if stop_processing:
-            task_status[task_id]["status"] = "cancelled"
-            task_status[task_id]["message"] = "任務被取消"
-            return None
-        
-        # 準備輸出文件名（使用專案資料夾）
-        if project_folder:
-            output_filename = os.path.join(project_folder, f"{task_id}.mp4")
-        else:
-            # 如果沒有專案資料夾，使用臨時目錄
-            import tempfile
-            output_filename = os.path.join(tempfile.gettempdir(), f"{task_id}.mp4")
-        
-        # 倒序生成：本段 i->i+1 使用「時間上下一段」(i+1)->(i+2) 的影片，取其最前 19 幀當歷史幀
-        prev_video_path = None
-        try:
-            if project_folder:
-                parts = os.path.basename(task_id).split("_")
-                if len(parts) >= 4 and parts[0] == "video":
-                    from_idx = int(parts[1])
-                    to_idx = int(parts[2])
-                    next_from = to_idx
-                    next_to = to_idx + 1
-                    prefix = f"video_{next_from}_{next_to}_"
-                    latest_file = None
-                    latest_mtime = None
-                    for fname in os.listdir(project_folder):
-                        if fname.startswith(prefix) and fname.endswith(".mp4"):
-                            fpath = os.path.join(project_folder, fname)
-                            mtime = os.path.getmtime(fpath)
-                            if latest_mtime is None or mtime > latest_mtime:
-                                latest_mtime = mtime
-                                latest_file = fpath
-                    if latest_file:
-                        prev_video_path = latest_file
-                        logger.info(f"找到時間上下一段影片作為歷史幀來源: {prev_video_path}")
-        except Exception as e:
-            logger.warning(f"尋找時間上下一段影片時發生錯誤: {e}")
-        
-        # 使用 framepack（已在啟動時匯入函式；模型載入應由外部模組在呼叫時處理）
-        if framepack_process_video:
-            # 使用自定義進度回調來更新任務狀態
-            def progress_callback(percentage, message):
-                task_status[task_id]["progress"] = percentage
-                task_status[task_id]["message"] = message
-                logger.info(f"任務 {task_id} 進度: {percentage}% - {message}")
-            
-            # 調用 framepack_start_end 處理函數
-            logger.info(f"使用 framepack_start_end 處理任務 {task_id}")
-            result = framepack_process_video(
-                start_image_path, 
-                end_image_path, 
-                progress_callback=progress_callback,
-                prompt=actual_params["prompt"],
-                n_prompt=actual_params["n_prompt"],
-                seed=actual_params["seed"],
-                total_second_length=actual_params["total_second_length"],
-                latent_window_size=actual_params["latent_window_size"],
-                steps=actual_params["steps"],
-                cfg=actual_params["cfg"],
-                gs=actual_params["gs"],
-                rs=actual_params["rs"],
-                gpu_memory_preservation=actual_params["gpu_memory_preservation"],
-                use_teacache=actual_params["use_teacache"],
-                mp4_crf=actual_params["mp4_crf"],
-                output=output_filename,
-                prev_video_path=prev_video_path
-            )
-            
-            if result:
-                task_status[task_id]["status"] = "completed"
-                task_status[task_id]["progress"] = 100
-                task_status[task_id]["message"] = "處理完成！"
-                task_status[task_id]["output_file"] = result
-                logger.info(f"任務 {task_id} 處理完成，輸出文件: {result}")
-                return result
-            else:
-                task_status[task_id]["status"] = "error"
-                task_status[task_id]["message"] = "處理失敗"
-                logger.error(f"任務 {task_id} 處理失敗")
-                return None
-        else:
-            # 如果無法導入 framepack，則標記任務為錯誤
-            logger.error(f"任務 {task_id} 無法處理: framepack 模組未成功導入。")
-            task_status[task_id]["status"] = "error"
-            task_status[task_id]["message"] = "處理模組不可用 (framepack missing)"
-            task_status[task_id]["progress"] = 0 # 確保進度為0
-            return None
-        
-    except Exception as e:
-        logger.error(f"處理任務 {task_id} 出錯: {e}")
-        traceback.print_exc()
-        task_status[task_id]["status"] = "error"
-        task_status[task_id]["message"] = f"錯誤: {str(e)}"
-        return None
-"""
-
-# 任務處理線程
-def task_processor():
-    global task_status, stop_processing
-    
-    logger.info("任務處理線程已啟動")
-    
-    while not stop_processing:
-        try:
-            # 從隊列獲取任務，非阻塞
-            try:
-                task = task_queue.get(block=False)
-                task_id = task.get("id")
-                logger.info(f"開始處理任務: {task_id}")
-                
-                # 處理任務
-                start_image = task.get("start_image")
-                end_image = task.get("end_image")
-                params = task.get("params", {})
-                project_folder = task.get("project_folder")
-                is_regenerate = task.get("is_regenerate", False)
-                
-                # 如果是重生任務，重置任務狀態為等待中
-                if is_regenerate:
-                    task_status[task_id] = {
-                        "status": "queued",
-                        "progress": 0,
-                        "message": "重生任務已加入隊列",
-                        "output_file": task_status.get(task_id, {}).get("output_file")  # 保留原有的輸出文件信息
-                    }
-                    logger.info(f"重生任務 {task_id} 狀態重置為等待中")
-                
-                result = process_video_task(task_id, start_image, end_image, params, project_folder)
-                
-                # 標記任務完成
-                task_queue.task_done()
-                
-            except queue.Empty:
-                # 隊列為空，等待
-                time.sleep(1)
-                continue
-                
-        except Exception as e:
-            logger.error(f"任務處理線程發生錯誤: {e}")
-            traceback.print_exc()
-            time.sleep(5)  # 出錯後稍微等待
-    
-    logger.info("任務處理線程已停止")
-
-
-# 從故事板JSON生成任務
 def start_continuous_generation(storyboard_file):
     """
     啟動連續生成流程（在單獨線程中運行）
@@ -635,112 +237,6 @@ def start_continuous_generation(storyboard_file):
         traceback.print_exc()
         return {"success": False, "message": f"Error starting continuous generation: {str(e)}"}
 
-
-def create_tasks_from_storyboard(storyboard_file):
-    """
-    從故事板JSON文件生成視頻處理任務
-    
-    Args:
-        storyboard_file: JSON文件路徑（已經在專案資料夾內）
-    
-    Returns:
-        添加的任務ID列表，或錯誤信息
-    """
-    try:
-        with open(storyboard_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        job_id = data.get("job_id", datetime.now().strftime("%Y%m%d_%H%M%S"))
-        nodes = data.get("nodes", [])
-        transitions = data.get("transitions", [])
-        
-        # 獲取專案資料夾路徑（JSON 文件已經在專案資料夾內）
-        project_folder = os.path.dirname(storyboard_file)
-        project_image_folder = os.path.join(project_folder, "images")
-        
-        if len(nodes) < 2:
-            error_msg = f"故事板 {storyboard_file} 節點少於2個，無法創建任務"
-            logger.warning(error_msg)
-            return {"success": False, "message": "Storyboard needs at least 2 nodes to generate videos."}
-        
-        # 獲取節點圖像路徑
-        # 為每一對連續節點創建任務（倒序入隊：最後一段先做，取時間上下一段最前 19 幀當歷史）
-        num_segments = len(nodes) - 1
-        tasks_to_queue = []
-        task_ids_ordered = [None] * num_segments
-        
-        for i in range(num_segments):
-            start_node = nodes[i]
-            end_node = nodes[i + 1]
-            
-            start_image_path = start_node.get("imagePath")
-            if start_image_path:
-                start_image_path = os.path.join(project_image_folder, os.path.basename(start_image_path))
-                if not os.path.exists(start_image_path):
-                    logger.error(f"無法找到節點 {i} 的圖片: {start_image_path}")
-                    continue
-            
-            end_image_path = end_node.get("imagePath")
-            if end_image_path:
-                end_image_path = os.path.join(project_image_folder, os.path.basename(end_image_path))
-                if not os.path.exists(end_image_path):
-                    logger.warning(f"無法找到節點 {i+1} 的圖片: {end_image_path}")
-                    end_image_path = None
-            
-            transition_text = ""
-            for transition in transitions:
-                if transition.get("from_node") == i and transition.get("to_node") == i + 1:
-                    transition_text = transition.get("text", "")
-                    break
-            
-            timestamp = datetime.now().strftime("%H%M%S")
-            task_id = f"video_{i}_{i+1}_{timestamp}"
-            
-            time_range = None
-            for transition in transitions:
-                if transition.get("from_node") == i and transition.get("to_node") == i + 1:
-                    time_range = transition.get("time_range")
-                    break
-            second_length = 5
-            if time_range and len(time_range) >= 2:
-                second_length = max(1, time_range[1] - time_range[0])
-            
-            node_seed = end_node.get("seed")
-            if node_seed is None:
-                node_seed = default_params["seed"]
-            
-            task = {
-                "id": task_id,
-                "start_image": start_image_path,
-                "end_image": end_image_path,
-                "project_folder": project_folder,
-                "params": {
-                    "prompt": f"Character movement: {transition_text}" if transition_text else default_params["prompt"],
-                    "total_second_length": second_length,
-                    "seed": node_seed
-                }
-            }
-            task_status[task_id] = {
-                "status": "queued",
-                "progress": 0,
-                "message": "In queue",
-                "created_at": datetime.now().isoformat()
-            }
-            tasks_to_queue.append((i, task_id, task))
-            task_ids_ordered[i] = task_id
-        
-        for i in reversed(range(num_segments)):
-            _, task_id, task = tasks_to_queue[i]
-            task_queue.put(task)
-            logger.info(f"創建任務 {task_id}，從節點 {i} 到節點 {i+1}（倒序入隊）")
-        
-        task_ids = [tid for tid in task_ids_ordered if tid is not None]
-        return {"success": True, "task_ids": task_ids, "project_folder": project_folder}
-        
-    except Exception as e:
-        logger.error(f"從故事板創建任務時出錯: {e}")
-        traceback.print_exc()
-        return {"success": False, "message": f"Error creating tasks: {str(e)}"}
 
 # 自定義 HTTP 請求處理器
 class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
@@ -1392,7 +888,6 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                     storyboard_data = json.load(f)
                 
                 nodes = storyboard_data.get('nodes', [])
-                transitions = storyboard_data.get('transitions', [])
                 
                 # 更新節點 seed（若有提供）
                 if new_seed is not None and 0 <= to_node < len(nodes):
@@ -1402,14 +897,12 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                         json.dump(storyboard_data, f, ensure_ascii=False, indent=2)
                         logger.info(f"已更新節點 {to_node} 的 seed 並寫回 {storyboard_file}")
                 
-                # 僅為指定段落創建任務
-                target_pair = [(from_node, to_node)]
-                result = create_tasks_from_nodes_and_transitions_direct(
-                    nodes,
-                    transitions,
-                    project_folder_path,
-                    target_pairs=target_pair,
-                )
+                if to_node != from_node + 1:
+                    raise ValueError("Only adjacent nodes can be regenerated in continuous mode.")
+
+                # 連續生成模式下，重生會更新指定節點 seed 後重跑整個 storyboard，
+                # 以確保所有片段都共享一致的連續上下文。
+                result = start_continuous_generation(storyboard_file)
                 
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
@@ -1419,8 +912,8 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 if result.get("success", False):
                     response = json.dumps({
                         'status': 'success',
-                        'message': f'Created {len(result["task_ids"])} regeneration tasks',
-                        'task_ids': result["task_ids"],
+                        'message': f'Started continuous regeneration for {result["num_segments"]} segments',
+                        'task_ids': [result["task_id"]],
                         'project_folder': project_folder_name
                     })
                 else:
@@ -1909,11 +1402,7 @@ def open_browser(PORT):
 if __name__ == '__main__':
     # 設置伺服器端口
     PORT = 7860
-    
-    # 啟動任務處理線程
-    processor_thread = threading.Thread(target=task_processor, daemon=True)
-    processor_thread.start()
-    
+
     # 創建伺服器
     with socketserver.TCPServer(("", PORT), StoryboardHandler) as httpd:
         logger.info("啟動故事板系統...")
@@ -1928,6 +1417,4 @@ if __name__ == '__main__':
             httpd.serve_forever()
         except KeyboardInterrupt:
             logger.info("伺服器關閉")
-            stop_processing = True  # 停止任務處理線程
-            processor_thread.join(timeout=5)  # 等待任務處理線程結束
             httpd.server_close()

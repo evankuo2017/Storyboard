@@ -589,8 +589,7 @@
                 nodes: [],                // Array of all nodes in the storyboard
                 currentNodeIndex: 0,      // Index of the currently selected node
                 zoom: 1,                  // Current zoom level of the timeline
-                taskIds: [],              // 存儲已提交的任務ID（舊架構）
-                continuousTaskId: null,   // 連續生成的任務ID（新架構）
+                continuousTaskId: null,   // 目前中的連續生成任務 ID
                 segmentVideos: [],        // 從後端載入的各段落影片資訊
                 currentProjectFolder: null, // 當前專案資料夾名稱
                 
@@ -911,7 +910,7 @@
                     })
                     .then(data => {
                         console.log('Success:', data);
-                        const saveMessage = `Processing successful! Total ${this.nodes.length} nodes.\n\n` +
+                        const saveMessage = `Storyboard saved successfully. Total ${this.nodes.length} nodes.\n\n` +
                                     `Project created: ${data.project_folder}\n` +
                                     `JSON file saved as ${data.filename}\n` +
                                     `Project path: ${data.project_path}`;
@@ -922,7 +921,7 @@
                             console.error("[State.processStoryboard] outputTextEl is null in fetch.then.");
                         }
                         
-                        // 建立專案後自動開始每個任務的生成（與以前一樣）
+                        // 建立專案後自動開始連續生成
                         const statusContainer = document.getElementById('processing-status-container');
                         if (statusContainer) statusContainer.style.display = 'block';
                         this.startVideoProcessing(data.project_folder);
@@ -945,12 +944,12 @@
                 
                 // 開始處理視頻（使用專案資料夾名稱）
                 startVideoProcessing(projectFolder) {
-                    console.log(`Starting video processing for project: ${projectFolder}`);
+                    console.log(`Starting continuous generation for project: ${projectFolder}`);
                     const currentOutputTextEl = document.getElementById('output-text');
                     if (currentOutputTextEl) {
-                        currentOutputTextEl.value += "\n\nStarting video processing...";
+                        currentOutputTextEl.value += "\n\nStarting continuous generation...";
                     } else {
-                        console.error("[State.startVideoProcessing] outputTextEl is null when starting video processing.");
+                        console.error("[State.startVideoProcessing] outputTextEl is null when starting continuous generation.");
                     }
                     
                     fetch('/process_storyboard', {
@@ -979,7 +978,7 @@
                             } else {
                                 console.error("[State.startVideoProcessing] outputTextEl is null when submitting tasks.");
                             }
-                            // 儲存單一任務ID
+                            // 儲存目前的連續任務 ID
                             this.continuousTaskId = data.task_id;
                             this.currentProjectFolder = data.project_folder; // 儲存專案資料夾信息
                             
@@ -999,7 +998,7 @@
                             // 處理錯誤響應
                             const el = document.getElementById('output-text');
                             if (el) {
-                                el.value += `\n\nSubmission failed: ${data.message}`;
+                                el.value += `\n\nContinuous generation failed to start: ${data.message}`;
                             } else {
                                 console.error("[State.startVideoProcessing] outputTextEl is null on submission failure.");
                             }
@@ -1007,17 +1006,17 @@
                             // 顯示錯誤訊息
                             alert(`Error: ${data.message}`);
                             
-                            // 隱藏處理狀態區域（如果沒有成功的任務）
-                            if (this.taskIds.length === 0) {
+                            // 隱藏處理狀態區域（如果沒有成功啟動連續任務）
+                            if (!this.continuousTaskId) {
                                 document.getElementById('processing-status-container').style.display = 'none';
                             }
                         }
                     })
                     .catch(error => {
-                        console.error('Processing request error:', error);
+                        console.error('Continuous generation request error:', error);
                         const el = document.getElementById('output-text');
                         if (el) {
-                            el.value += `\n\nProcessing request error: ${error.message}`;
+                            el.value += `\n\nContinuous generation request error: ${error.message}`;
                         } else {
                             console.error("[State.startVideoProcessing] outputTextEl is null on request error.");
                         }
@@ -1054,7 +1053,7 @@
                 
                 // 更新任務狀態
                 updateTaskStatus() {
-                    // 如果沒有連續任務ID，則不需要查詢
+                    // 如果沒有連續任務 ID，則不需要查詢
                     if (!this.continuousTaskId) {
                         return;
                     }
@@ -1351,12 +1350,8 @@
                                 this.currentProjectFolder = data.project_folder;
                             }
                             
-                            const newTaskIds = Array.isArray(data.task_ids) ? data.task_ids : [];
-                            newTaskIds.forEach(id => {
-                                if (!this.taskIds.includes(id)) {
-                                    this.taskIds.push(id);
-                                }
-                            });
+                            const newTaskId = data.task_id || (Array.isArray(data.task_ids) ? data.task_ids[0] : null);
+                            this.continuousTaskId = newTaskId;
                             
                             const statusContainer = document.getElementById('processing-status-container');
                             if (statusContainer) {
@@ -1365,7 +1360,7 @@
                             
                             this.startTaskStatusPolling();
                             if (statusMessageEl) {
-                                statusMessageEl.textContent = `已提交重生任務：${fromNode} → ${toNode}`;
+                                statusMessageEl.textContent = `已開始連續重生：${fromNode} → ${toNode}`;
                             }
                         })
                         .catch(error => {
@@ -2059,6 +2054,8 @@
                         console.log(`Attempting to update image for node ${state.currentNodeIndex}`);
                         state.updateNodeImage(state.currentNodeIndex, file);
                     }
+                    // 重置 value，讓相同檔案再次選取時也能觸發 change 事件
+                    imageUploadEl.value = '';
                 });
             }
             
@@ -2944,7 +2941,7 @@
                                         state.currentProjectFolder = storyboardData.project_folder_name || storyboardData.project_folder || state.currentProjectFolder;
                                         const segmentVideos = Array.isArray(storyboardData.segment_videos) ? storyboardData.segment_videos : [];
                                         state.segmentVideos = segmentVideos;
-                                        state.taskIds = Array.from(new Set(segmentVideos.map(seg => seg.task_id)));
+                                        state.continuousTaskId = null;
                                         
                                         const requiredSegments = Math.max(0, state.nodes.length - 1);
                                         const statusContainer = document.getElementById('processing-status-container');
@@ -2952,11 +2949,7 @@
                                             statusContainer.style.display = 'block';
                                             state.renderTaskStatus({});
                                         }
-                                        if (state.taskIds.length > 0) {
-                                            state.startTaskStatusPolling();
-                                        } else {
-                                            state.stopTaskStatusPolling();
-                                        }
+                                        state.stopTaskStatusPolling();
                                         
                                         if (typeof updateConcatButtonState === 'function') {
                                             updateConcatButtonState();
