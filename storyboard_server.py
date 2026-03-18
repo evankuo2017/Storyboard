@@ -214,6 +214,7 @@ def create_tasks_from_nodes_and_transitions_direct(nodes, transitions, project_f
             return {"success": False, "message": f"節點 {missing_images} 缺少圖片文件"}
         
         task_ids = []
+        tasks_to_queue = []  # (segment_idx, task_id, task) 供倒序入隊
         
         # 為指定的節點對創建任務（未指定則處理全部）
         for i in range(len(nodes) - 1):
@@ -292,13 +293,11 @@ def create_tasks_from_nodes_and_transitions_direct(nodes, transitions, project_f
                 "params": {
                     "prompt": transition_text,
                     "seed": seed,
-                    "second_length": second_length
+                    "total_second_length": second_length
                 }
             }
             
-            # 將任務添加到隊列
-            task_queue.put(task)
-            
+            tasks_to_queue.append((i, task_id, task))
             task_ids.append(task_id)
             
             # 初始化或更新任務狀態
@@ -320,6 +319,11 @@ def create_tasks_from_nodes_and_transitions_direct(nodes, transitions, project_f
                     "progress": 0
                 }
                 logger.info(f"創建新任務狀態: {task_id}")
+        
+        # 倒序入隊：與 Create Storyboard 一致，最後一段先做，以便 prev_video_path 可取時間上下一段
+        for i, tid, t in reversed(tasks_to_queue):
+            task_queue.put(t)
+            logger.info(f"重生任務入隊 {tid}，從節點 {i} 到節點 {i+1}（倒序）")
         
         logger.info(f"成功創建 {len(task_ids)} 個重新生成任務")
         return {"success": True, "task_ids": task_ids}
@@ -723,9 +727,9 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 for item in os.listdir(OUTPUT_DIR):
                     if ('nodes_' in item or item.startswith('storyboard_')) and os.path.isdir(os.path.join(OUTPUT_DIR, item)):
                         project_path = os.path.join(OUTPUT_DIR, item)
-                        # 在每個專案資料夾中搜尋 JSON 文件
+                        # 在每個專案資料夾中搜尋 storyboard JSON 文件（排除 final_boundaries.json 等）
                         for filename in os.listdir(project_path):
-                            if filename.endswith('.json'):
+                            if filename.startswith('storyboard_') and filename.endswith('.json'):
                                 file_path = os.path.join(project_path, filename)
                                 file_stats = os.stat(file_path)
                                 files.append({
@@ -774,6 +778,16 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
                 response_data = {"status": "error", "message": "Invalid filename"}
+                self.wfile.write(json.dumps(response_data).encode('utf-8'))
+                return
+            
+            # 僅允許載入 storyboard_*.json（排除 final_boundaries.json 等）
+            if not filename.startswith('storyboard_') or not filename.endswith('.json'):
+                self.send_response(400)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                response_data = {"status": "error", "message": "Only storyboard JSON files can be loaded"}
                 self.wfile.write(json.dumps(response_data).encode('utf-8'))
                 return
 
@@ -1104,10 +1118,10 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                     if not os.path.exists(project_folder_path):
                         raise ValueError(f"Project folder not found: {project_folder_path}")
                     
-                    # 在專案資料夾中尋找 JSON 檔案
-                    json_files = [f for f in os.listdir(project_folder_path) if f.endswith('.json')]
+                    # 在專案資料夾中尋找 storyboard JSON 檔案（排除 final_boundaries.json 等）
+                    json_files = [f for f in os.listdir(project_folder_path) if f.startswith('storyboard_') and f.endswith('.json')]
                     if not json_files:
-                        raise ValueError(f"No JSON file found in project folder: {project_folder_path}")
+                        raise ValueError(f"No storyboard JSON file found in project folder: {project_folder_path}")
                     
                     # 讀取第一個 JSON 檔案（通常只有一個）
                     storyboard_file_path = os.path.join(project_folder_path, json_files[0])
@@ -1245,11 +1259,11 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 if not os.path.exists(project_folder_path):
                     raise ValueError(f"Project folder does not exist: {project_folder_path}")
                 
-                # 找到專案中的 storyboard JSON 檔案（取最新修改時間）
+                # 找到專案中的 storyboard JSON 檔案（取最新修改時間，排除 final_boundaries.json 等）
                 json_files = [
                     os.path.join(project_folder_path, f)
                     for f in os.listdir(project_folder_path)
-                    if f.endswith('.json')
+                    if f.startswith('storyboard_') and f.endswith('.json')
                 ]
                 if not json_files:
                     raise ValueError(f"No storyboard JSON file found in project folder: {project_folder_path}")
@@ -1311,6 +1325,77 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 })
                 self.wfile.write(response.encode('utf-8'))
         
+        # 重生所有片段（Regenerate All）
+        elif self.path == '/regenerate_all':
+            content_length = int(self.headers.get('Content-Length', '0'))
+            post_data = self.rfile.read(content_length) if content_length > 0 else b'{}'
+            
+            try:
+                data = json.loads(post_data.decode('utf-8') or '{}')
+                project_folder_value = data.get('project_folder')
+                
+                if not project_folder_value:
+                    raise ValueError("No project folder provided")
+                
+                if os.path.isabs(project_folder_value):
+                    project_folder_path = project_folder_value
+                    project_folder_name = os.path.relpath(project_folder_value, OUTPUT_DIR)
+                else:
+                    project_folder_name = project_folder_value
+                    project_folder_path = os.path.join(OUTPUT_DIR, project_folder_value)
+                
+                if not os.path.exists(project_folder_path):
+                    raise ValueError(f"Project folder does not exist: {project_folder_path}")
+                
+                json_files = [
+                    f for f in os.listdir(project_folder_path)
+                    if f.startswith('storyboard_') and f.endswith('.json')
+                ]
+                if not json_files:
+                    raise ValueError(f"No storyboard JSON file found in project folder: {project_folder_path}")
+                storyboard_file = max(
+                    [os.path.join(project_folder_path, f) for f in json_files],
+                    key=lambda p: os.path.getmtime(p)
+                )
+                
+                with open(storyboard_file, 'r', encoding='utf-8') as f:
+                    storyboard_data = json.load(f)
+                nodes = storyboard_data.get('nodes', [])
+                transitions = storyboard_data.get('transitions', [])
+                
+                result = create_tasks_from_nodes_and_transitions_direct(
+                    nodes, transitions, project_folder_path,
+                    target_pairs=None  # 全部片段
+                )
+                
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                
+                if result.get("success", False):
+                    response = json.dumps({
+                        'status': 'success',
+                        'message': f'已提交 {len(result["task_ids"])} 個重生任務',
+                        'task_ids': result['task_ids'],
+                        'project_folder': project_folder_name
+                    })
+                else:
+                    response = json.dumps({
+                        'status': 'error',
+                        'message': result.get("message", "Unknown error occurred")
+                    })
+                self.wfile.write(response.encode('utf-8'))
+                
+            except Exception as e:
+                logger.error(f"Regenerate All 錯誤: {e}")
+                traceback.print_exc()
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({'status': 'error', 'message': str(e)}).encode('utf-8'))
+        
         # 串接所有片段影片為一支最終影片
         elif self.path == '/concat_videos':
             content_length = int(self.headers.get('Content-Length', '0'))
@@ -1332,11 +1417,11 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 if not os.path.isdir(project_folder_path):
                     raise ValueError(f"Project folder does not exist: {project_folder_path}")
                 
-                # 找到專案中的 storyboard JSON 檔案（取最新修改時間）
+                # 找到專案中的 storyboard JSON 檔案（取最新修改時間，排除 final_boundaries.json 等）
                 json_files = [
                     os.path.join(project_folder_path, f)
                     for f in os.listdir(project_folder_path)
-                    if f.endswith('.json')
+                    if f.startswith('storyboard_') and f.endswith('.json')
                 ]
                 if not json_files:
                     raise ValueError(f"No storyboard JSON file found in project folder: {project_folder_path}")

@@ -539,6 +539,7 @@
         <div style="margin-top: 30px; display: flex; gap: 10px; justify-content: center;">
             <button id="load-storyboard-btn" class="button-primary" style="padding: 15px 30px; font-size: 16px; min-width: 200px;">Load Storyboard</button>
             <button id="process-btn" class="button-primary" style="padding: 15px 30px; font-size: 16px; min-width: 200px;">Create Storyboard</button>
+            <button id="regenerate-all-btn" class="button-primary" style="padding: 15px 30px; font-size: 16px; min-width: 200px; background-color: #e07c5b;" disabled>Regenerate All</button>
             <button id="concat-videos-btn" class="button-primary" style="padding: 15px 30px; font-size: 16px; min-width: 200px; background-color: #455a64;" disabled>Concat videos</button>
         </div>
 
@@ -980,6 +981,7 @@
                             }
                             this.taskIds = data.task_ids;
                             this.currentProjectFolder = data.project_folder; // 儲存專案資料夾信息
+                            if (typeof updateRegenerateAllButtonState === 'function') updateRegenerateAllButtonState();
                             
                             // 顯示專案資料夾信息
                             if (data.project_folder) {
@@ -1315,6 +1317,7 @@
                             if (data.project_folder) {
                                 this.currentProjectFolder = data.project_folder;
                             }
+                            if (typeof updateRegenerateAllButtonState === 'function') updateRegenerateAllButtonState();
                             
                             const newTaskIds = Array.isArray(data.task_ids) ? data.task_ids : [];
                             newTaskIds.forEach(id => {
@@ -1336,6 +1339,52 @@
                         .catch(error => {
                             console.error('重生影片錯誤:', error);
                             alert(`重生失敗: ${error.message}`);
+                        });
+                },
+                
+                // 重生所有片段（Regenerate All）
+                regenerateAll() {
+                    if (!this.currentProjectFolder) {
+                        alert('請先載入專案後再使用 Regenerate All。');
+                        return;
+                    }
+                    if (this.nodes.length < 2) {
+                        alert('至少需要 2 個節點才能生成影片。');
+                        return;
+                    }
+                    if (!confirm('將重新生成所有片段影片，覆蓋既有檔案。是否繼續？')) return;
+                    
+                    fetch('/regenerate_all', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ project_folder: this.currentProjectFolder })
+                    })
+                        .then(async response => {
+                            const text = await response.text();
+                            if (!text || !text.trim()) {
+                                throw new Error('伺服器無回應或回應為空，請確認使用 storyboard_server.py 或 storyboard_server_old.py 並已加入 /regenerate_all 端點');
+                            }
+                            try {
+                                return JSON.parse(text);
+                            } catch (e) {
+                                throw new Error(`伺服器回應非 JSON: ${text.substring(0, 100)}`);
+                            }
+                        })
+                        .then(data => {
+                            if (data.status !== 'success') {
+                                alert(`Regenerate All 失敗: ${data.message}`);
+                                return;
+                            }
+                            const newTaskIds = Array.isArray(data.task_ids) ? data.task_ids : [];
+                            this.taskIds = [...new Set([...this.taskIds, ...newTaskIds])];
+                            const statusContainer = document.getElementById('processing-status-container');
+                            if (statusContainer) statusContainer.style.display = 'block';
+                            this.startTaskStatusPolling();
+                            if (statusMessageEl) statusMessageEl.textContent = data.message || `已提交 ${newTaskIds.length} 個重生任務`;
+                        })
+                        .catch(error => {
+                            console.error('Regenerate All 錯誤:', error);
+                            alert(`Regenerate All 失敗: ${error.message}`);
                         });
                 },
                 
@@ -1375,6 +1424,7 @@
             const imageUploadEl = document.getElementById('image-upload');
             const nodeTableEl = document.getElementById('node-table');
             const processBtnEl = document.getElementById('process-btn');
+            const regenerateAllBtnEl = document.getElementById('regenerate-all-btn');
             const concatVideosBtnEl = document.getElementById('concat-videos-btn');
             const outputTextEl = document.getElementById('output-text');
             
@@ -1981,6 +2031,12 @@
                     console.log('Load storyboard button clicked');
                     listAvailableStoryboards();
                 });
+                
+                if (regenerateAllBtnEl) {
+                    regenerateAllBtnEl.addEventListener('click', () => {
+                        state.regenerateAll();
+                    });
+                }
                 
                 // Handle window resize
                 window.addEventListener('resize', () => {
@@ -2770,6 +2826,14 @@
                 } else {
                     concatVideosBtnEl.disabled = true;
                 }
+                updateRegenerateAllButtonState();
+            }
+            
+            // Regenerate All 按鈕：有載入專案且至少 2 節點時啟用
+            function updateRegenerateAllButtonState() {
+                if (!regenerateAllBtnEl) return;
+                const canRegenerate = state.currentProjectFolder && state.nodes.length >= 2;
+                regenerateAllBtnEl.disabled = !canRegenerate;
             }
             
             // 查詢和處理可用的故事板
@@ -2925,6 +2989,9 @@
                                         
                                         if (typeof updateConcatButtonState === 'function') {
                                             updateConcatButtonState();
+                                        }
+                                        if (typeof updateRegenerateAllButtonState === 'function') {
+                                            updateRegenerateAllButtonState();
                                         }
                                         
                                         // 偵測 final.mp4：若有則顯示於 UI 最下方
