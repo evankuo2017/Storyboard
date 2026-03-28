@@ -1,6 +1,6 @@
 # Storyboard Project
 
-A storyboard generation system based-on FramePack for up to 120-second video generation with user-specified intermediate frames, paired with an integrated image-editing AI agent.
+A storyboard generation system based-on FramePack for up to 120-second video generation with **10 user-specified intermediate frames**, paired with an integrated image-editing AI agent.
 
 ## Installation
 
@@ -56,6 +56,28 @@ pip install -r requirements.txt
    ![Node Summary：載入或建立 storyboard](docs/storyboard-node-summary.png)
 
    (Your storyboard will be stored in the `storyboard_outputs` folder.)
+
+## Model downloads & disk space
+
+**Automatic downloads:** The first time you use a feature, the corresponding weights are downloaded automatically (Hugging Face Hub, SAM checkpoint URLs, DIS-SAM IS-Net, etc.). No separate manual download step is required for normal use.
+
+**Where files go (typical layout):**
+
+| Location | What tends to land there |
+|----------|---------------------------|
+| `hf_download/hub/` (under the directory from which you start the server) | Qwen2.5-VL-7B-Instruct, SDXL outpaint stack (ControlNet Union + RealVisXL + VAE), and other code paths that set `cache_dir` to this folder |
+| `~/.cache/huggingface/hub/` | FramePack / Hunyuan / SigLIP stack (`from_pretrained` without a project `cache_dir`), Qwen-Image-Edit-2509 + DFloat11 companion, ObjectClear, etc. |
+| `checkpoints/` (inside this repo) | Segment Anything (`vit_h`) and DIS-SAM IS-Net weights |
+
+**How much disk to plan for:**
+
+- **Video generation only** (FramePack continuous path + SAM / segmentation as used): on the order of **45–55 GB** for the core video + local checkpoint folders.
+- **All integrated features** (video + Qwen-VL + outpaint + Qwen-Image-Edit-2509 + ObjectClear + DIS-SAM/SAM), with **each weight stored once** (single cache layout): about **150–165 GB** is a realistic total.
+- **Why people sometimes see ~200 GB+:** duplicate downloads (e.g. same repo under both `hf_download/` and `~/.cache/huggingface/`), optional extra checkpoints (e.g. alternate FramePack variants), or incomplete cleanups—not a requirement for the app to run.
+
+*Note:* Point `HF_HOME` / `cache_dir` consistently if you want to avoid paying for the same model twice on disk.
+
+**Context:** Local pipelines that combine *one* large video model plus VL + SDXL + heavy image editors are routinely in the **~100–200+ GB** range on disk—similar in order of magnitude to installing several popular ComfyUI / Automatic1111 model packs side by side. Users who only need storyboard **video** can stay near the **~50 GB** tier above; the big footprint is optional and comes from the bundled editing / reasoning stack.
 
 ## Model Licenses
 
