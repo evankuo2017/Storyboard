@@ -1,5 +1,6 @@
 from diffusers_helper.hf_login import login
 
+import json
 import os
 import torch
 import traceback
@@ -461,21 +462,7 @@ def process_storyboard_continuous(segments, output_dir, progress_callback=None):
             if not _high_vram:
                 unload_complete_models()
         
-        # 4. 生成完畢後，切片保存各個片段的 MP4
-        logger.info("生成完畢，保存各個片段的 MP4...")
-        for info in all_segment_info:
-            actual_seg_idx = info['actual_seg_idx']
-            segment = info['segment']
-            
-            if actual_seg_idx in segment_pixel_ranges:
-                start_frame, end_frame = segment_pixel_ranges[actual_seg_idx]
-                if start_frame is not None and end_frame is not None:
-                    segment_pixels = history_pixels[:, :, start_frame:end_frame, :, :]
-                    output_path = segment['output_path']
-                    logger.info(f"保存片段 {actual_seg_idx} 到 {output_path} (幀 {start_frame}~{end_frame}，共 {end_frame - start_frame} 幀)")
-                    save_bcthw_as_mp4(segment_pixels, output_path, fps=30, crf=shared_params['mp4_crf'])
-        
-        # 5. 保存最終的 final.mp4（完整的 history_pixels）
+        # 4. 保存 final.mp4（完整連續生成的 history_pixels）
         logger.info("保存 final.mp4...")
         if progress_callback:
             progress_callback(-1, 50, "保存 final.mp4...")
@@ -483,6 +470,18 @@ def process_storyboard_continuous(segments, output_dir, progress_callback=None):
         final_path = os.path.join(output_dir, "final.mp4")
         logger.info(f"final.mp4 形狀: {history_pixels.shape}，總幀數: {history_pixels.shape[2]}")
         save_bcthw_as_mp4(history_pixels, final_path, fps=30, crf=shared_params['mp4_crf'])
+        
+        # 保存邊界 frame indices，供實驗比對 concat vs final 時精確對應同一語意邊界
+        boundaries_path = os.path.join(output_dir, "final_boundaries.json")
+        boundary_frames = []
+        for i in range(len(all_segment_info) - 1):
+            if i + 1 in segment_pixel_ranges:
+                start_next = segment_pixel_ranges[i + 1][0]
+                boundary_frames.append(start_next)  # segment i|i+1 的邊界 = segment i+1 的起始幀
+        if boundary_frames:
+            with open(boundaries_path, "w", encoding="utf-8") as f:
+                json.dump({"boundary_frames": boundary_frames, "total_frames": int(history_pixels.shape[2])}, f, indent=2)
+            logger.info(f"final_boundaries.json 已保存: {boundary_frames}")
         
         logger.info(f"final.mp4 已保存到 {final_path}")
         

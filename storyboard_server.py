@@ -162,16 +162,12 @@ def start_continuous_generation(storyboard_file):
             if node_seed is None:
                 node_seed = default_params["seed"]
             
-            timestamp = datetime.now().strftime("%H%M%S")
-            output_path = os.path.join(project_folder, f"video_{i}_{i+1}_{timestamp}.mp4")
-            
             segments.append({
                 "start_image_path": start_image_path,
                 "end_image_path": end_image_path,
                 "prompt": f"Character movement: {transition_text}" if transition_text else default_params["prompt"],
                 "seed": node_seed,
                 "total_second_length": second_length,
-                "output_path": output_path
             })
         
         # 創建一個特殊的任務ID來追踪整體進度
@@ -352,9 +348,9 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 for item in os.listdir(OUTPUT_DIR):
                     if ('nodes_' in item or item.startswith('storyboard_')) and os.path.isdir(os.path.join(OUTPUT_DIR, item)):
                         project_path = os.path.join(OUTPUT_DIR, item)
-                        # 在每個專案資料夾中搜尋 JSON 文件
+                        # 在每個專案資料夾中搜尋 storyboard JSON 文件（排除 final_boundaries.json 等）
                         for filename in os.listdir(project_path):
-                            if filename.endswith('.json'):
+                            if filename.startswith('storyboard_') and filename.endswith('.json'):
                                 file_path = os.path.join(project_path, filename)
                                 file_stats = os.stat(file_path)
                                 files.append({
@@ -733,8 +729,8 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                     if not os.path.exists(project_folder_path):
                         raise ValueError(f"Project folder not found: {project_folder_path}")
                     
-                    # 在專案資料夾中尋找 JSON 檔案
-                    json_files = [f for f in os.listdir(project_folder_path) if f.endswith('.json')]
+                    # 在專案資料夾中尋找 storyboard JSON 檔案（排除 final_boundaries.json 等）
+                    json_files = [f for f in os.listdir(project_folder_path) if f.startswith('storyboard_') and f.endswith('.json')]
                     if not json_files:
                         raise ValueError(f"No JSON file found in project folder: {project_folder_path}")
                     
@@ -874,11 +870,11 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 if not os.path.exists(project_folder_path):
                     raise ValueError(f"Project folder does not exist: {project_folder_path}")
                 
-                # 找到專案中的 storyboard JSON 檔案（取最新修改時間）
+                # 找到專案中的 storyboard JSON 檔案（取最新修改時間，排除 final_boundaries.json 等）
                 json_files = [
                     os.path.join(project_folder_path, f)
                     for f in os.listdir(project_folder_path)
-                    if f.endswith('.json')
+                    if f.startswith('storyboard_') and f.endswith('.json')
                 ]
                 if not json_files:
                     raise ValueError(f"No storyboard JSON file found in project folder: {project_folder_path}")
@@ -958,11 +954,11 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 if not os.path.isdir(project_folder_path):
                     raise ValueError(f"Project folder does not exist: {project_folder_path}")
                 
-                # 找到專案中的 storyboard JSON 檔案（取最新修改時間）
+                # 找到專案中的 storyboard JSON 檔案（取最新修改時間，排除 final_boundaries.json 等）
                 json_files = [
                     os.path.join(project_folder_path, f)
                     for f in os.listdir(project_folder_path)
-                    if f.endswith('.json')
+                    if f.startswith('storyboard_') and f.endswith('.json')
                 ]
                 if not json_files:
                     raise ValueError(f"No storyboard JSON file found in project folder: {project_folder_path}")

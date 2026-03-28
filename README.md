@@ -1,6 +1,6 @@
 # Storyboard Project
 
-A storyboard generation system that integrates multiple advanced image and video generation technologies.
+A storyboard generation system based-on FramePack for up to 120-second video generation with user-specified intermediate frames, paired with an integrated image-editing AI agent.
 
 ## Installation
 
@@ -34,11 +34,28 @@ pip install -r requirements.txt
    - Open your browser and visit `http://localhost:7860`
 
 3. **Create storyboards**:
-   - Upload images to nodes
-   - Set transition descriptions
-   - Generate video sequences
+   
+   ### Upload images to nodes
 
+   ![FramePack Storyboard：時間軸節點與上傳區](docs/storyboard-nodes-ui.png)
 
+   You can upload or modify the uploaded image.
+
+   ![Image Generation Config：參考圖與提示詞](docs/storyboard-node-image-config.png)
+
+   ### Set transition descriptions
+
+   In **Node Controls**, set each node’s time if needed and describe what happens between this node and the next in **Transition Description to Next Node**.
+
+   ![Node Controls：節點時間與轉場描述](docs/storyboard-node-controls.png)
+
+   ### Generate video sequences
+
+   You can **load an existing storyboard** or **create a new storyboard** in **Node Summary** to start generating video.
+
+   ![Node Summary：載入或建立 storyboard](docs/storyboard-node-summary.png)
+
+   (Your storyboard will be stored in the `storyboard_outputs` folder.)
 
 ## Model Licenses
 
