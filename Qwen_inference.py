@@ -786,6 +786,236 @@ def extract_remove_bounding_boxes(
                 pass
 
 
+def _clamp_and_filter_boxes(raw_boxes, width: int, height: int) -> list:
+    """將任意 raw boxes 轉成 `{label, box_xyxy}` 並 clamp 進影像邊界，過濾非法框。"""
+    cleaned = []
+    for item in raw_boxes or []:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label", "object"))
+        box = item.get("box_xyxy") or item.get("bbox_2d") or item.get("bbox")
+        if not (isinstance(box, (list, tuple)) and len(box) == 4):
+            continue
+        try:
+            x0, y0, x1, y1 = [int(round(float(v))) for v in box]
+        except Exception:
+            continue
+        x0 = max(0, min(x0, width))
+        x1 = max(0, min(x1, width))
+        y0 = max(0, min(y0, height))
+        y1 = max(0, min(y1, height))
+        if x1 > x0 and y1 > y0:
+            cleaned.append({"label": label, "box_xyxy": [x0, y0, x1, y1]})
+    return cleaned
+
+
+def extract_remove_bboxes_iterative(
+    image: str,
+    user_prompt: str,
+    max_rounds: int = 3,
+    max_attempts_per_round: int = 3,
+    expand_scale: float = 0.10,
+) -> dict:
+    """
+    迭代式物件框選：
+    - Round 1：在原圖直接找出要移除的物件。
+    - Round 2+：將「目前累積的框選」在原圖上塗黑，讓 Qwen 只看非黑區域，
+      判斷是否還有遺漏物件需要移除；若模型回 need_more=false（或未給新框）
+      就提前結束。
+    - 最後將所有累積框擴大 `expand_scale`（預設 10%）。
+
+    回傳格式與 `extract_remove_bounding_boxes` 一致：
+      {
+        "image_size": [width, height],
+        "format": "SAM_xyxy_pixel",
+        "boxes": [ {label, box_xyxy}, ...]
+      }
+    """
+    try:
+        with Image.open(image) as im:
+            width, height = im.size
+    except Exception as e:
+        raise ValueError(f"無法讀取圖片 {image}: {e}")
+
+    model, processor = get_qwen_model_and_processor()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    def _run_messages(messages, max_new_tokens: int = 512) -> str:
+        text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        image_inputs, video_inputs = process_vision_info(messages)
+        inputs = processor(
+            text=[text],
+            images=image_inputs,
+            videos=video_inputs,
+            padding=True,
+            return_tensors="pt",
+        )
+        inputs = {k: v.to(device) if hasattr(v, 'to') else v for k, v in inputs.items()}
+        out_ids = model.generate(**inputs, max_new_tokens=max_new_tokens)
+        trimmed = [o[len(i):] for i, o in zip(inputs['input_ids'], out_ids)]
+        decoded = processor.batch_decode(
+            trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )
+        return (decoded[0] if decoded else "").strip()
+
+    def _parse_json_obj(raw: str):
+        start = raw.find('{')
+        end = raw.rfind('}')
+        raw_json = raw[start:end + 1] if (start != -1 and end > start) else raw
+        try:
+            return _parse_json_with_fallback(raw_json)
+        except Exception:
+            return None
+
+    accumulated: list = []
+    tmp_files: list = []
+
+    try:
+        # ========== Round 1：原圖偵測 ==========
+        system_prompt_r1 = (
+            "You are a vision assistant that returns bounding boxes for objects to remove.\n"
+            "Task: From the user's prompt, extract all object categories that should be removed if present in the image.\n"
+            "Look at the image and return bounding boxes for each matched object you find.\n"
+            "Be highly sensitive to very small objects and tiny details.\n"
+            "Prefer high recall: if uncertain, include a plausible bounding box (slightly larger is acceptable) rather than missing the object.\n"
+            "Output strictly JSON with key 'boxes'.\n"
+            "- boxes: array of {label: string, box_xyxy: [x0,y0,x1,y1]} where coordinates are integer pixels,\n"
+            f"  0 <= x0 < x1 <= {width}, 0 <= y0 < y1 <= {height}.\n"
+            "Do not include any extra text. Return JSON only."
+        )
+        messages_r1 = [
+            {"role": "system", "content": [{"type": "text", "text": system_prompt_r1}]},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": image},
+                    {"type": "text", "text": f"user_prompt: {user_prompt}"},
+                ],
+            },
+        ]
+        for attempt in range(max_attempts_per_round):
+            raw = _run_messages(messages_r1, max_new_tokens=256)
+            print(f"[Qwen][iter-round1] attempt {attempt + 1}: {raw[:300]}")
+            parsed = _parse_json_obj(raw)
+            if not isinstance(parsed, dict):
+                continue
+            new_boxes = _clamp_and_filter_boxes(parsed.get("boxes", []), width, height)
+            accumulated.extend(new_boxes)
+            break
+        print(f"[Qwen][iter] round 1 累積 {len(accumulated)} 個 boxes")
+
+        if not accumulated:
+            return {
+                "image_size": [width, height],
+                "format": "SAM_xyxy_pixel",
+                "boxes": [],
+            }
+
+        # ========== Round 2+：塗黑已累積區域，再問「還有沒有要移除的」 ==========
+        for round_idx in range(2, max_rounds + 1):
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_masked:
+                masked_path = tmp_masked.name
+                tmp_files.append(masked_path)
+            mask_bboxes_on_image(image, accumulated, output_path=masked_path)
+
+            accumulated_summary = "\n".join(
+                [
+                    f"{i + 1}. {b['label']}: {b['box_xyxy']}"
+                    for i, b in enumerate(accumulated)
+                ]
+            )
+            system_prompt_more = (
+                f"Original removal request: \"{user_prompt}\"\n\n"
+                f"Previous rounds already detected {len(accumulated)} object(s):\n"
+                f"{accumulated_summary}\n\n"
+                "In the image you will see now, those regions are masked BLACK.\n"
+                "Your job: look ONLY at the NON-BLACK areas and decide whether any MORE objects\n"
+                "matching the original removal request still remain.\n"
+                "- If NO new objects remain -> need_more=false and boxes=[].\n"
+                "- If new objects remain -> need_more=true and boxes=[new boxes ONLY].\n"
+                "- NEVER return boxes that overlap the existing black regions.\n"
+                "- Box coordinates must be in the ORIGINAL image coordinate frame (not relative to the black areas).\n"
+                f"  Image width={width}, height={height}. 0<=x0<x1<=width, 0<=y0<y1<=height.\n"
+                "Output strictly JSON only, with this schema:\n"
+                "{\n"
+                '  "need_more": true | false,\n'
+                '  "reason": "short explanation",\n'
+                '  "boxes": [ {"label": "...", "box_xyxy": [x0,y0,x1,y1]}, ... ]\n'
+                "}"
+            )
+            user_text_more = (
+                "The image now has BLACK RECTANGLES where previously detected objects were. "
+                "Please focus on the NON-BLACK areas and find any remaining objects to remove."
+            )
+            messages_more = [
+                {"role": "system", "content": [{"type": "text", "text": system_prompt_more}]},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "image": masked_path},
+                        {"type": "text", "text": user_text_more},
+                    ],
+                },
+            ]
+
+            need_more = False
+            new_boxes: list = []
+            reason = ""
+            parsed_ok = False
+            for attempt in range(max_attempts_per_round):
+                raw = _run_messages(messages_more, max_new_tokens=512)
+                print(f"[Qwen][iter-round{round_idx}] attempt {attempt + 1}: {raw[:300]}")
+                parsed = _parse_json_obj(raw)
+                if not isinstance(parsed, dict):
+                    continue
+                nm = parsed.get("need_more", False)
+                need_more = (
+                    nm.strip().lower() in ("true", "yes", "1")
+                    if isinstance(nm, str)
+                    else bool(nm)
+                )
+                reason = str(parsed.get("reason", ""))
+                new_boxes = _clamp_and_filter_boxes(parsed.get("boxes", []), width, height)
+                parsed_ok = True
+                break
+
+            print(
+                f"[Qwen][iter] round {round_idx}: parsed_ok={parsed_ok}, "
+                f"need_more={need_more}, new={len(new_boxes)}, reason={reason}"
+            )
+
+            if not parsed_ok:
+                break
+            if not need_more:
+                break
+            if not new_boxes:
+                break
+            accumulated.extend(new_boxes)
+
+        # ========== 統一擴張 10% ==========
+        expanded = []
+        for b in accumulated:
+            ex = expand_bbox(b["box_xyxy"], (width, height), scale=expand_scale)
+            expanded.append({"label": b["label"], "box_xyxy": ex})
+
+        print(
+            f"[Qwen][iter] 最終累積 {len(expanded)} 個 boxes（已擴張 {expand_scale * 100:.0f}%）"
+        )
+        return {
+            "image_size": [width, height],
+            "format": "SAM_xyxy_pixel",
+            "boxes": expanded,
+        }
+
+    finally:
+        for p in tmp_files:
+            try:
+                if p and os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
+
+
 if __name__ == "__main__":
     # 命令列模式：維持原先介面
     parser = argparse.ArgumentParser(description="Qwen2.5-VL inference with optional image path")

@@ -28,7 +28,7 @@ from framepack_start_end import process_storyboard_continuous, unload_framepack
 from Qwen_inference import (
     get_qwen_model_and_processor,
     classify_image_edit_task,
-    extract_remove_bounding_boxes,
+    extract_remove_bboxes_iterative,
     analyze_zoom_out_ratio,
     unload_qwen
 )
@@ -1194,64 +1194,73 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                 if negative_prompt:
                                     qwen_prompt = user_prompt + " do not remove the object list below: " + negative_prompt
                                     logger.info(f"ObjectClear 使用擴展 prompt: {qwen_prompt[:100]}...")
-                                
-                                # 呼叫 Qwen 的框選任務
-                                boxes_result = extract_remove_bounding_boxes(reference_image_file, qwen_prompt) or {"boxes": []}
+
+                                # === 步驟 1：Qwen 迭代式框選 ===
+                                # 反覆「塗黑已知框 → 再問是否有遺漏」，直到模型說無或達上限。
+                                task_status[job_id]['message'] = 'ObjectClear：Qwen 迭代框選中...'
+                                get_qwen_model_and_processor()
+                                boxes_result = extract_remove_bboxes_iterative(
+                                    reference_image_file,
+                                    qwen_prompt,
+                                    max_rounds=3,
+                                ) or {"boxes": []}
                                 task_status[job_id]['remove_boxes'] = boxes_result
-                                
-                                # 完成框選後立即卸載 Qwen
+
+                                # 卸載 Qwen 以釋放顯存給 DIS-SAM / ObjectClear
                                 try:
                                     unload_qwen()
                                 except Exception as e:
                                     logger.warning(f"Qwen 卸載失敗: {e}")
-                                
-                                # 使用 DIS-SAM 產生精確 mask（兩階段：SAM + IS-Net 精煉）
-                                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_mask:
-                                    tmp_mask_path = tmp_mask.name
-                                
-                                # 呼叫 DIS-SAM 推理（直接傳入 boxes_result dict，DIS-SAM 會自動處理）
-                                logger.info("開始 DIS-SAM 推理（SAM + IS-Net 精煉，使用用戶 prompt）...")
-                                mask_path = generate_masks_with_dis_sam(
-                                    image_path=reference_image_file,
-                                    boxes_json=boxes_result,  # 直接傳入 dict，DIS-SAM 接受這種格式
-                                    output_mask_path=tmp_mask_path,
-                                    sam_model_type="vit_h",  # 使用 vit_l（更快）或 vit_h（更準確）
-                                    device="cuda" if torch.cuda.is_available() else "cpu",
-                                    use_refinement=True,  # 使用 IS-Net 精煉（完整 DIS-SAM）
-                                    auto_download=True
-                                )
-                                
-                                # 完成 DIS-SAM 推理後卸載模型以釋放顯存
-                                try:
-                                    unload_dis_sam_model()
-                                    logger.info("DIS-SAM 模型已卸載")
-                                except Exception as e:
-                                    logger.warning(f"DIS-SAM 模型卸載失敗: {e}")
-                                
-                                # 使用 ObjectClear 模型完成物件移除
-                                # 呼叫 ObjectClear 推理
-                                logger.info("開始 ObjectClear 推理...")
-                                final_output_path = infer_on_two_images(
-                                    sample_image_path=reference_image_file,
-                                    mask_image_path=mask_path,
-                                    output_path=None,
-                                    use_fp16=False,
-                                    steps=20,
-                                    guidance_scale=2.5,
-                                    seed=42,
-                                    device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                                )
-                                
-                                # 將 ObjectClear 的結果複製到最終輸出
-                                shutil.copy2(final_output_path, tmp_image_path)
-                                
-                                # 清理檔案
-                                try:
-                                    os.unlink(final_output_path)
-                                    os.unlink(tmp_mask_path)
-                                except:
-                                    pass
-                                    
+
+                                if not boxes_result.get("boxes"):
+                                    logger.info("[ObjectClear] 迭代框選結果為空，直接輸出原圖")
+                                    shutil.copy2(reference_image_file, tmp_image_path)
+                                else:
+                                    # === 步驟 2：DIS-SAM 產生精確 mask（單次） ===
+                                    task_status[job_id]['message'] = 'ObjectClear：DIS-SAM 分割中...'
+                                    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_mask:
+                                        tmp_mask_path = tmp_mask.name
+
+                                    logger.info(
+                                        f"[ObjectClear] 累積 {len(boxes_result['boxes'])} 個 boxes，開始 DIS-SAM 推理..."
+                                    )
+                                    mask_path = generate_masks_with_dis_sam(
+                                        image_path=reference_image_file,
+                                        boxes_json=boxes_result,
+                                        output_mask_path=tmp_mask_path,
+                                        sam_model_type="vit_h",
+                                        device="cuda" if torch.cuda.is_available() else "cpu",
+                                        use_refinement=True,
+                                        auto_download=True,
+                                    )
+                                    try:
+                                        unload_dis_sam_model()
+                                        logger.info("DIS-SAM 模型已卸載")
+                                    except Exception as e:
+                                        logger.warning(f"DIS-SAM 模型卸載失敗: {e}")
+
+                                    # === 步驟 3：ObjectClear 推理（單次） ===
+                                    task_status[job_id]['message'] = 'ObjectClear：生成中...'
+                                    logger.info("[ObjectClear] 開始 ObjectClear 推理...")
+                                    final_output_path = infer_on_two_images(
+                                        sample_image_path=reference_image_file,
+                                        mask_image_path=mask_path,
+                                        output_path=None,
+                                        use_fp16=False,
+                                        steps=20,
+                                        guidance_scale=2.5,
+                                        seed=42,
+                                        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+                                    )
+
+                                    shutil.copy2(final_output_path, tmp_image_path)
+
+                                    try:
+                                        os.unlink(final_output_path)
+                                        os.unlink(tmp_mask_path)
+                                    except Exception:
+                                        pass
+
                                 logger.info("ObjectClear 推理完成")
                                 
                             except Exception as e:

@@ -365,8 +365,11 @@ def process_storyboard_continuous(segments, output_dir, progress_callback=None):
             clean_latents_post, clean_latents_2x, clean_latents_4x = history_latents[:, :, :1 + 2 + 16, :, :].split([1, 2, 16], dim=2)
             clean_latents = torch.cat([clean_latents_pre, clean_latents_post], dim=2)
             
-            # 只有第一段的第一 section 使用 end image
-            if cond['has_end_image'] and is_first_section_of_segment and is_first_segment:
+            # 每一段的第一個處理 section（padding 最大，window 貼近段末）都用該段 end image 作為 post anchor，
+            # 讓所有中間節點也能被當作 end condition 引導（不再只限於時序最末段）。
+            # the first section of every segment uses its own end_latent as post anchor,
+            # so every intermediate keyframe gets a near-end soft condition.
+            if cond['has_end_image'] and is_first_section_of_segment:
                 clean_latents_post = cond['end_latent'].to(history_latents)
                 clean_latents = torch.cat([clean_latents_pre, clean_latents_post], dim=2)
             
@@ -421,7 +424,10 @@ def process_storyboard_continuous(segments, output_dir, progress_callback=None):
                 callback=callback,
             )
             
-            if is_last_section_overall:
+            # 每段的最後一個處理 section（padding=0，window 貼近段首）都硬插入該段 start_latent 到生成結果最前，
+            # 讓每個節點（含所有中間節點）都能逐像素出現在最終影片中（原本只對整支 video 的最末 section 做）。
+            # hard-insert start_latent at every segment's padding==0 section, not only the global last one.
+            if is_last_section_of_segment:
                 generated_latents = torch.cat([cond['start_latent'].to(generated_latents), generated_latents], dim=2)
             
             total_generated_latent_frames += int(generated_latents.shape[2])
@@ -440,7 +446,9 @@ def process_storyboard_continuous(segments, output_dir, progress_callback=None):
                 if is_first_section_of_segment:
                     segment_pixel_ranges[actual_seg_idx] = [0, None]
             else:
-                section_latent_frames = (shared_params['latent_window_size'] * 2 + 1) if is_last_section_overall else (shared_params['latent_window_size'] * 2)
+                # 硬插入發生在每個 is_last_section_of_segment，section_latent_frames 要隨之 +1 以涵蓋多出的 start_latent 幀
+                # match the extra latent frame added by the per-segment hard-insert above.
+                section_latent_frames = (shared_params['latent_window_size'] * 2 + 1) if is_last_section_of_segment else (shared_params['latent_window_size'] * 2)
                 overlapped_frames = shared_params['latent_window_size'] * 4 - 3
                 current_pixels = vae_decode(real_history_latents[:, :, :section_latent_frames], models['vae']).cpu()
                 
