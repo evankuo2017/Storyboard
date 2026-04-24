@@ -348,7 +348,7 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 for item in os.listdir(OUTPUT_DIR):
                     if ('nodes_' in item or item.startswith('storyboard_')) and os.path.isdir(os.path.join(OUTPUT_DIR, item)):
                         project_path = os.path.join(OUTPUT_DIR, item)
-                        # 在每個專案資料夾中搜尋 storyboard JSON 文件（排除 final_boundaries.json 等）
+                        # 在每個專案資料夾中搜尋 storyboard JSON 文件（排除 concat_boundaries.json 等）
                         for filename in os.listdir(project_path):
                             if filename.startswith('storyboard_') and filename.endswith('.json'):
                                 file_path = os.path.join(project_path, filename)
@@ -531,9 +531,9 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                                 }
 
                 data['segment_videos'] = segment_videos
-                # 偵測 final.mp4 是否存在，供前端在載入時顯示於最下方
-                final_mp4_path = os.path.join(project_folder_path, "final.mp4")
-                data['has_final_mp4'] = os.path.isfile(final_mp4_path)
+                # 偵測 concat.mp4 是否存在，供前端在載入時顯示於最下方（Storyboard_Concat 版本命名）
+                concat_mp4_path = os.path.join(project_folder_path, "concat.mp4")
+                data['has_concat_mp4'] = os.path.isfile(concat_mp4_path)
                 
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
@@ -729,7 +729,7 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                     if not os.path.exists(project_folder_path):
                         raise ValueError(f"Project folder not found: {project_folder_path}")
                     
-                    # 在專案資料夾中尋找 storyboard JSON 檔案（排除 final_boundaries.json 等）
+                    # 在專案資料夾中尋找 storyboard JSON 檔案（排除 concat_boundaries.json 等）
                     json_files = [f for f in os.listdir(project_folder_path) if f.startswith('storyboard_') and f.endswith('.json')]
                     if not json_files:
                         raise ValueError(f"No JSON file found in project folder: {project_folder_path}")
@@ -870,7 +870,7 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 if not os.path.exists(project_folder_path):
                     raise ValueError(f"Project folder does not exist: {project_folder_path}")
                 
-                # 找到專案中的 storyboard JSON 檔案（取最新修改時間，排除 final_boundaries.json 等）
+                # 找到專案中的 storyboard JSON 檔案（取最新修改時間，排除 concat_boundaries.json 等）
                 json_files = [
                     os.path.join(project_folder_path, f)
                     for f in os.listdir(project_folder_path)
@@ -954,7 +954,7 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 if not os.path.isdir(project_folder_path):
                     raise ValueError(f"Project folder does not exist: {project_folder_path}")
                 
-                # 找到專案中的 storyboard JSON 檔案（取最新修改時間，排除 final_boundaries.json 等）
+                # 找到專案中的 storyboard JSON 檔案（取最新修改時間，排除 concat_boundaries.json 等）
                 json_files = [
                     os.path.join(project_folder_path, f)
                     for f in os.listdir(project_folder_path)

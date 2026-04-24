@@ -539,7 +539,7 @@
         <div style="margin-top: 30px; display: flex; gap: 10px; justify-content: center;">
             <button id="load-storyboard-btn" class="button-primary" style="padding: 15px 30px; font-size: 16px; min-width: 200px;">Load Storyboard</button>
             <button id="process-btn" class="button-primary" style="padding: 15px 30px; font-size: 16px; min-width: 200px;">Create Storyboard</button>
-            <!-- Concat按鈕已移除：連續生成會自動產生 final.mp4 -->
+                            <!-- Concat按鈕已移除：連續生成會自動產生 concat.mp4 -->
         </div>
 
         <!-- 修改處理狀態區域，刪除刷新按鈕 -->
@@ -1077,7 +1077,7 @@
                                 console.log('Continuous generation completed');
                                 this.stopTaskStatusPolling();
                                 
-                                // 如果成功完成，直接顯示 final.mp4
+                                // 如果成功完成，直接顯示 concat.mp4
                                 if (task.status === 'completed' && this.currentProjectFolder && task.output_file) {
                                     const placeholderEl = document.getElementById('final-video-placeholder');
                                     const playerEl = document.getElementById('final-video-player');
@@ -1193,7 +1193,7 @@
                     }
                 },
                 
-                // 載入專案並顯示 final.mp4（如果存在）
+                // 載入專案並顯示 concat.mp4（如果存在）
                 loadStoryboard(projectFolder) {
                     console.log(`Loading storyboard for project: ${projectFolder}`);
                     
@@ -1205,20 +1205,20 @@
                             return response.json();
                         })
                         .then(storyboardData => {
-                            // 檢查是否有 final.mp4
-                            const hasFinalMp4 = !!storyboardData.has_final_mp4;
+                            // 檢查是否有 concat.mp4
+                            const hasConcatMp4 = !!storyboardData.has_concat_mp4;
                             const placeholderEl = document.getElementById('final-video-placeholder');
                             const playerEl = document.getElementById('final-video-player');
                             
-                            if (hasFinalMp4 && playerEl && projectFolder) {
-                                // 顯示 final.mp4
-                                const videoUrl = `/video/${encodeURIComponent(projectFolder)}/final.mp4`;
+                            if (hasConcatMp4 && playerEl && projectFolder) {
+                                // 顯示 concat.mp4
+                                const videoUrl = `/video/${encodeURIComponent(projectFolder)}/concat.mp4`;
                                 playerEl.src = videoUrl + '?t=' + Date.now();
                                 playerEl.style.display = 'block';
                                 if (placeholderEl) placeholderEl.style.display = 'none';
-                                console.log(`Final video loaded: ${videoUrl}`);
+                                console.log(`Concat video loaded: ${videoUrl}`);
                             } else {
-                                // 沒有 final.mp4
+                                // 沒有 concat.mp4
                                 if (playerEl) playerEl.style.display = 'none';
                                 if (placeholderEl) {
                                     placeholderEl.style.display = 'block';
@@ -2955,12 +2955,12 @@
                                             updateConcatButtonState();
                                         }
                                         
-                                        // 偵測 final.mp4：若有則顯示於 UI 最下方
-                                        const hasFinalMp4 = !!storyboardData.has_final_mp4;
+                                        // 偵測 concat.mp4：若有則顯示於 UI 最下方
+                                        const hasConcatMp4 = !!storyboardData.has_concat_mp4;
                                         const placeholderEl = document.getElementById('final-video-placeholder');
                                         const playerEl = document.getElementById('final-video-player');
-                                        if (hasFinalMp4 && playerEl && state.currentProjectFolder) {
-                                            const videoUrl = `/video/${encodeURIComponent(state.currentProjectFolder)}/final.mp4`;
+                                        if (hasConcatMp4 && playerEl && state.currentProjectFolder) {
+                                            const videoUrl = `/video/${encodeURIComponent(state.currentProjectFolder)}/concat.mp4`;
                                             playerEl.src = videoUrl + '?t=' + Date.now();
                                             playerEl.style.display = 'block';
                                             if (placeholderEl) placeholderEl.style.display = 'none';
