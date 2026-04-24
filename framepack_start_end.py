@@ -323,8 +323,10 @@ def process_storyboard_continuous(segments, output_dir, progress_callback=None):
         total_generated_latent_frames = 0
         num_frames = shared_params['latent_window_size'] * 4 - 3
         
-        # 記錄每個片段在 history_pixels 中的起始幀位置（pixel 空間）
-        segment_pixel_ranges = {}  # {actual_seg_idx: (start_frame, end_frame)}
+        # 記錄每個 section 處理完畢後的累積 pixel 長度，供之後反推正向時序的段落邊界。
+        # record cumulative pixel length right AFTER each section is processed,
+        # used later to back out forward-time segment boundaries.
+        section_cumulative_lengths = []  # [{actual_seg_idx, is_last_section_of_segment, cumulative_length}]
         
         for section_idx, latent_padding in enumerate(all_paddings):
             # 確定當前屬於哪個片段
@@ -365,11 +367,8 @@ def process_storyboard_continuous(segments, output_dir, progress_callback=None):
             clean_latents_post, clean_latents_2x, clean_latents_4x = history_latents[:, :, :1 + 2 + 16, :, :].split([1, 2, 16], dim=2)
             clean_latents = torch.cat([clean_latents_pre, clean_latents_post], dim=2)
             
-            # 每一段的第一個處理 section（padding 最大，window 貼近段末）都用該段 end image 作為 post anchor，
-            # 讓所有中間節點也能被當作 end condition 引導（不再只限於時序最末段）。
-            # the first section of every segment uses its own end_latent as post anchor,
-            # so every intermediate keyframe gets a near-end soft condition.
-            if cond['has_end_image'] and is_first_section_of_segment:
+            # 只有第一段的第一 section 使用 end image
+            if cond['has_end_image'] and is_first_section_of_segment and is_first_segment:
                 clean_latents_post = cond['end_latent'].to(history_latents)
                 clean_latents = torch.cat([clean_latents_pre, clean_latents_post], dim=2)
             
@@ -424,10 +423,7 @@ def process_storyboard_continuous(segments, output_dir, progress_callback=None):
                 callback=callback,
             )
             
-            # 每段的最後一個處理 section（padding=0，window 貼近段首）都硬插入該段 start_latent 到生成結果最前，
-            # 讓每個節點（含所有中間節點）都能逐像素出現在最終影片中（原本只對整支 video 的最末 section 做）。
-            # hard-insert start_latent at every segment's padding==0 section, not only the global last one.
-            if is_last_section_of_segment:
+            if is_last_section_overall:
                 generated_latents = torch.cat([cond['start_latent'].to(generated_latents), generated_latents], dim=2)
             
             total_generated_latent_frames += int(generated_latents.shape[2])
@@ -442,28 +438,21 @@ def process_storyboard_continuous(segments, output_dir, progress_callback=None):
             # 解碼與 overlap
             if history_pixels is None:
                 history_pixels = vae_decode(real_history_latents, models['vae']).cpu()
-                # 記錄第一個片段的起始位置
-                if is_first_section_of_segment:
-                    segment_pixel_ranges[actual_seg_idx] = [0, None]
             else:
-                # 硬插入發生在每個 is_last_section_of_segment，section_latent_frames 要隨之 +1 以涵蓋多出的 start_latent 幀
-                # match the extra latent frame added by the per-segment hard-insert above.
-                section_latent_frames = (shared_params['latent_window_size'] * 2 + 1) if is_last_section_of_segment else (shared_params['latent_window_size'] * 2)
+                section_latent_frames = (shared_params['latent_window_size'] * 2 + 1) if is_last_section_overall else (shared_params['latent_window_size'] * 2)
                 overlapped_frames = shared_params['latent_window_size'] * 4 - 3
                 current_pixels = vae_decode(real_history_latents[:, :, :section_latent_frames], models['vae']).cpu()
-                
-                # 記錄片段的起始位置（在第一個 section decode 後）
-                if is_first_section_of_segment:
-                    segment_pixel_ranges[actual_seg_idx] = [history_pixels.shape[2], None]
-                
                 history_pixels = soft_append_bcthw(current_pixels, history_pixels, overlapped_frames)
             
-            # 記錄片段的結束位置（在最後一個 section decode 後）
+            # 紀錄本 section 處理完後 history_pixels 的累積長度，之後用來反推正向時序的段落邊界。
+            # record cumulative pixel length after this section for later forward-time boundary derivation.
+            section_cumulative_lengths.append({
+                'actual_seg_idx': actual_seg_idx,
+                'is_last_section_of_segment': is_last_section_of_segment,
+                'cumulative_length': int(history_pixels.shape[2]),
+            })
+            
             if is_last_section_of_segment:
-                if actual_seg_idx in segment_pixel_ranges:
-                    segment_pixel_ranges[actual_seg_idx][1] = history_pixels.shape[2]
-                    logger.info(f"片段 {actual_seg_idx} 像素範圍: {segment_pixel_ranges[actual_seg_idx]}")
-                
                 if progress_callback:
                     progress_callback(actual_seg_idx, 100, f"片段 {actual_seg_idx} 完成")
             
@@ -479,17 +468,38 @@ def process_storyboard_continuous(segments, output_dir, progress_callback=None):
         logger.info(f"final.mp4 形狀: {history_pixels.shape}，總幀數: {history_pixels.shape[2]}")
         save_bcthw_as_mp4(history_pixels, final_path, fps=30, crf=shared_params['mp4_crf'])
         
-        # 保存邊界 frame indices，供實驗比對 concat vs final 時精確對應同一語意邊界
+        # 由「section 處理完時的累積長度」反推每個片段在最終影片（正向時序）的起始幀。
+        # 因為 soft_append_bcthw 會把 current_pixels 塞到 history_pixels 前面（prepend），
+        # 所以某 section 處理完時的累積長度 L 代表：該 section 的內容會被後續 prepend 推到最終影片的 [total-L, total] 之後。
+        # 一個片段的「正向時序起始」= 該片段最後一個被處理的 section（padding=0, is_last_section_of_segment=True）
+        # 剛處理完時的「total - cumulative」。
+        # derive forward-time segment start: soft_append prepends current, so content captured at cumulative=L
+        # later sits at [total-L, total]. A segment's forward start = total - cumulative right after its last-processed section.
+        total_frames = int(history_pixels.shape[2])
+        segment_forward_start = {}
+        for info in section_cumulative_lengths:
+            if info['is_last_section_of_segment']:
+                segment_forward_start[info['actual_seg_idx']] = total_frames - info['cumulative_length']
+        
+        segment_pixel_ranges = {}
+        sorted_seg_keys = sorted(segment_forward_start.keys())
+        for pos, seg_k in enumerate(sorted_seg_keys):
+            start = segment_forward_start[seg_k]
+            end = segment_forward_start[sorted_seg_keys[pos + 1]] if pos + 1 < len(sorted_seg_keys) else total_frames
+            segment_pixel_ranges[seg_k] = [start, end]
+            logger.info(f"片段 {seg_k} 像素範圍（正向時序）: {segment_pixel_ranges[seg_k]}")
+        
+        # 保存邊界 frame indices，供實驗比對 concat vs final 時精確對應同一語意邊界。
+        # boundary_frames[i] = 片段 i 與片段 i+1 的邊界 = 片段 i+1 在最終影片中的起始幀（forward-time）
         boundaries_path = os.path.join(output_dir, "final_boundaries.json")
         boundary_frames = []
         for i in range(len(all_segment_info) - 1):
-            if i + 1 in segment_pixel_ranges:
-                start_next = segment_pixel_ranges[i + 1][0]
-                boundary_frames.append(start_next)  # segment i|i+1 的邊界 = segment i+1 的起始幀
+            if (i + 1) in segment_forward_start:
+                boundary_frames.append(segment_forward_start[i + 1])
         if boundary_frames:
             with open(boundaries_path, "w", encoding="utf-8") as f:
-                json.dump({"boundary_frames": boundary_frames, "total_frames": int(history_pixels.shape[2])}, f, indent=2)
-            logger.info(f"final_boundaries.json 已保存: {boundary_frames}")
+                json.dump({"boundary_frames": boundary_frames, "total_frames": total_frames}, f, indent=2)
+            logger.info(f"final_boundaries.json 已保存: {boundary_frames} (total={total_frames})")
         
         logger.info(f"final.mp4 已保存到 {final_path}")
         
