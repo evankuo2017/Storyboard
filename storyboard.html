@@ -2973,6 +2973,24 @@
                                             if (playerEl) playerEl.style.display = 'none';
                                         }
                                         
+                                        // Storyboard_Concat 版本：load 進來後若專案尚無 concat.mp4 則自動觸發連續生成，
+                                        // 完成後會在同一個專案資料夾產生 concat.mp4 與 concat_boundaries.json。
+                                        // auto-trigger continuous generation on project load when concat.mp4 is missing.
+                                        if (!hasConcatMp4
+                                            && state.currentProjectFolder
+                                            && Array.isArray(state.nodes)
+                                            && state.nodes.length > 1) {
+                                            if (placeholderEl) {
+                                                placeholderEl.style.display = 'block';
+                                                placeholderEl.textContent = '載入完成，開始自動連續生成 concat.mp4…';
+                                                placeholderEl.style.color = '#666';
+                                            }
+                                            if (outputTextEl) {
+                                                outputTextEl.value += `\n\n[Auto] concat.mp4 不存在，對專案 '${state.currentProjectFolder}' 自動觸發連續生成。`;
+                                            }
+                                            state.startVideoProcessing(state.currentProjectFolder);
+                                        }
+                                        
                                         document.body.removeChild(dialog);
                                     })
                                     .catch(error => {
