@@ -74,6 +74,92 @@ def create_project_structure(project_folder):
     os.makedirs(image_folder, exist_ok=True)
     return image_folder
 
+
+def serve_video_with_range(handler, video_path):
+    """
+    支援 HTTP Range；以 sendfile（若可用）或分塊寫出 body，不整檔讀入記憶體。
+    須搭配 ThreadedTCPServer：每條 /video/ 連線在獨立 thread，下載／播放不阻塞其他 API。
+    """
+    file_size = os.path.getsize(video_path)
+    chunk_size = 1024 * 1024  # 1 MiB fallback 分塊
+
+    range_header = (handler.headers.get("Range") or handler.headers.get("range") or "").strip()
+    start = 0
+    end = file_size - 1
+
+    if range_header.startswith("bytes="):
+        try:
+            spec = range_header.split("=", 1)[1].strip()
+            if "," in spec:
+                spec = spec.split(",", 1)[0]
+            if spec.startswith("-"):
+                suffix = int(spec[1:])
+                start = max(0, file_size - suffix)
+            else:
+                left, _, right = spec.partition("-")
+                if left:
+                    start = int(left)
+                if right:
+                    end = int(right)
+                else:
+                    end = file_size - 1
+            if start < 0 or start >= file_size or start > end:
+                handler.send_response(416)
+                handler.send_header("Content-Range", f"bytes */{file_size}")
+                handler.send_header("Access-Control-Allow-Origin", "*")
+                handler.end_headers()
+                return
+            end = min(end, file_size - 1)
+        except (ValueError, IndexError):
+            start, end = 0, file_size - 1
+
+    content_length = end - start + 1
+    is_full = start == 0 and end == file_size - 1
+
+    if is_full:
+        handler.send_response(200)
+    else:
+        handler.send_response(206)
+        handler.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
+
+    handler.send_header("Content-type", "video/mp4")
+    handler.send_header("Content-length", str(content_length))
+    handler.send_header("Accept-Ranges", "bytes")
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header(
+        "Access-Control-Expose-Headers",
+        "Content-Range, Accept-Ranges, Content-Length",
+    )
+    handler.end_headers()
+
+    def _write_body_from_file(f):
+        conn = handler.connection
+        remaining = content_length
+        if remaining <= 0:
+            return
+        sendfile = getattr(conn, "sendfile", None)
+        if sendfile:
+            try:
+                sendfile(f, offset=start, count=content_length)
+                return
+            except OSError:
+                pass
+        f.seek(start)
+        while remaining > 0:
+            n = min(chunk_size, remaining)
+            buf = f.read(n)
+            if not buf:
+                break
+            handler.wfile.write(buf)
+            remaining -= len(buf)
+
+    try:
+        with open(video_path, "rb") as f:
+            _write_body_from_file(f)
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+
+
 # 任務處理狀態
 task_status = {}  # 存儲任務狀態的字典
 preview_jobs = {}
@@ -580,15 +666,7 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
             
             if video_path and os.path.exists(video_path):
                 logger.info(f"提供影片檔案: {video_path}")
-                self.send_response(200)
-                # 明確設定 MP4 的 Content-Type
-                self.send_header('Content-type', 'video/mp4')
-                self.send_header('Content-length', str(os.path.getsize(video_path)))
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                
-                with open(video_path, 'rb') as f:
-                    self.wfile.write(f.read())
+                serve_video_with_range(self, video_path)
             else:
                 logger.error(f"找不到影片檔案: {video_name}")
                 self.send_response(404)
@@ -1398,6 +1476,15 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
         
 
+# 多執行緒 TCP：下載大檔時不阻塞其他 HTTP API（單 thread 時會整站假死）
+class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    """
+    每個 HTTP 連線（含 /video/ 串流）在獨立 thread 處理，避免傳大檔時卡死整個 UI/API。
+    """
+    daemon_threads = True
+    allow_reuse_address = True
+
+
 # 自動開啟瀏覽器
 def open_browser(PORT):
     """在啟動伺服器後自動開啟瀏覽器"""
@@ -1409,7 +1496,7 @@ if __name__ == '__main__':
     PORT = 7860
 
     # 創建伺服器
-    with socketserver.TCPServer(("", PORT), StoryboardHandler) as httpd:
+    with ThreadedTCPServer(("", PORT), StoryboardHandler) as httpd:
         logger.info("啟動故事板系統...")
         logger.info(f"輸出目錄: {os.path.abspath(OUTPUT_DIR)}")
         logger.info(f"伺服器啟動在 http://localhost:{PORT}")
