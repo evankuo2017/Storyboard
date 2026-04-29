@@ -566,11 +566,11 @@
             </div>
         </div>
 
-        <!-- UI 最下方預留空白區，生成完成後在此顯示最終影片 -->
+        <!-- UI 最下方：內嵌播放器；後端以 ThreadingMixIn 另 thread 傳送 /video/，不阻塞其他 API -->
         <div id="final-video-container" style="margin-top: 30px; min-height: 120px; padding: 15px; background: #f5f5f5; border-radius: 8px;">
             <h2 style="margin-top: 0;">最終影片</h2>
             <p id="final-video-placeholder" style="color: #666; margin: 10px 0;">影片生成完成後會顯示於此。</p>
-            <video id="final-video-player" controls style="max-width: 100%; max-height: 70vh; background: #000; display: none;"></video>
+            <video id="final-video-player" controls preload="metadata" playsinline style="max-width: 100%; max-height: 70vh; background: #000; display: none;"></video>
         </div>
     </div>
 
@@ -1077,22 +1077,17 @@
                                 console.log('Continuous generation completed');
                                 this.stopTaskStatusPolling();
                                 
-                                // 如果成功完成，直接顯示 final.mp4
+                                // 如果成功完成，在下方內嵌顯示 final.mp4（串流由伺服器另 thread 處理）
                                 if (task.status === 'completed' && this.currentProjectFolder && task.output_file) {
                                     const placeholderEl = document.getElementById('final-video-placeholder');
                                     const playerEl = document.getElementById('final-video-player');
-                                    
                                     if (playerEl) {
                                         const videoUrl = `/video/${encodeURIComponent(this.currentProjectFolder)}/${task.output_file}`;
                                         playerEl.src = videoUrl + '?t=' + Date.now();
                                         playerEl.style.display = 'block';
                                         playerEl.load();
-                                        console.log(`Final video displayed: ${videoUrl}`);
                                     }
-                                    
-                                    if (placeholderEl) {
-                                        placeholderEl.style.display = 'none';
-                                    }
+                                    if (placeholderEl) placeholderEl.style.display = 'none';
                                 }
                             }
                         }
@@ -1209,16 +1204,12 @@
                             const hasFinalMp4 = !!storyboardData.has_final_mp4;
                             const placeholderEl = document.getElementById('final-video-placeholder');
                             const playerEl = document.getElementById('final-video-player');
-                            
                             if (hasFinalMp4 && playerEl && projectFolder) {
-                                // 顯示 final.mp4
                                 const videoUrl = `/video/${encodeURIComponent(projectFolder)}/final.mp4`;
                                 playerEl.src = videoUrl + '?t=' + Date.now();
                                 playerEl.style.display = 'block';
                                 if (placeholderEl) placeholderEl.style.display = 'none';
-                                console.log(`Final video loaded: ${videoUrl}`);
                             } else {
-                                // 沒有 final.mp4
                                 if (playerEl) playerEl.style.display = 'none';
                                 if (placeholderEl) {
                                     placeholderEl.style.display = 'block';
@@ -1232,9 +1223,8 @@
                         });
                 },
                 
-                // 查看視頻結果
+                // 查看視頻結果（內嵌播放器）
                 viewVideoResult(outputFile) {
-                    // 在查看視頻前先刷新狀態
                     this.updateTaskStatus();
                     
                     const fileName = outputFile.split('/').pop().split('\\').pop();
@@ -1257,32 +1247,29 @@
                     dialog.style.alignItems = 'center';
                     dialog.style.justifyContent = 'center';
                     
-                    // 視頻標題
                     const title = document.createElement('h2');
                     title.textContent = fileName;
                     title.style.color = 'white';
                     title.style.marginBottom = '20px';
                     
                     const video = document.createElement('video');
-                    video.src = videoSrc;
+                    video.src = videoSrc + '?t=' + Date.now();
                     video.controls = true;
-                    video.autoplay = true;
+                    video.playsInline = true;
+                    video.preload = 'metadata';
                     video.style.maxWidth = '80%';
                     video.style.maxHeight = '70%';
                     video.style.boxShadow = '0 0 20px rgba(0, 0, 0, 0.5)';
                     
-                    // 關閉按鈕
                     const closeButton = document.createElement('button');
                     closeButton.textContent = 'Close';
                     closeButton.className = 'button-primary';
                     closeButton.style.marginTop = '20px';
                     closeButton.onclick = () => {
                         document.body.removeChild(dialog);
-                        // 關閉對話框後再次刷新狀態
                         this.updateTaskStatus();
                     };
                     
-                    // 添加元素到對話框
                     dialog.appendChild(title);
                     dialog.appendChild(video);
                     dialog.appendChild(closeButton);
@@ -1942,7 +1929,6 @@
                         
                         concatVideosBtnEl.disabled = true;
                         concatVideosBtnEl.textContent = 'Concatenating...';
-                        // 重置最下方預留區：先顯示提示，隱藏影片
                         const placeholderEl = document.getElementById('final-video-placeholder');
                         const playerEl = document.getElementById('final-video-player');
                         if (placeholderEl) {
@@ -1966,7 +1952,6 @@
                                     outputTextEl.value += `\n\nConcat videos completed: ${fileName}`;
                                 }
                                 
-                                // 銜接完的影片顯示在 UI 最下方預留區，不開彈窗
                                 const placeholder = document.getElementById('final-video-placeholder');
                                 const player = document.getElementById('final-video-player');
                                 if (placeholder) placeholder.style.display = 'none';
@@ -2955,7 +2940,6 @@
                                             updateConcatButtonState();
                                         }
                                         
-                                        // 偵測 final.mp4：若有則顯示於 UI 最下方
                                         const hasFinalMp4 = !!storyboardData.has_final_mp4;
                                         const placeholderEl = document.getElementById('final-video-placeholder');
                                         const playerEl = document.getElementById('final-video-player');
