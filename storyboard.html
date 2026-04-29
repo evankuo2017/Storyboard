@@ -536,6 +536,17 @@
             </table>
         </div>
         
+        <div style="margin-top: 24px; max-width: 520px; margin-left: auto; margin-right: auto;">
+            <label for="project-name-input" style="display: block; margin-bottom: 8px; font-weight: 600;">專案命名</label>
+            <input type="text" id="project-name-input" maxlength="60" placeholder="例如：demo_夜景"
+                style="width: 100%; padding: 10px 12px; font-size: 15px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px;" />
+            <p style="color: #666; font-size: 13px; margin-top: 8px; line-height: 1.45;">
+                按下 <strong>Create Storyboard</strong> 後，輸出資料夾為：
+                <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 4px;">您輸入的名稱_節點數_總時長秒數</code>
+                （非法字元會改為底線；若同名資料夾已存在會自動加上時間戳）
+            </p>
+        </div>
+        
         <div style="margin-top: 30px; display: flex; gap: 10px; justify-content: center;">
             <button id="load-storyboard-btn" class="button-primary" style="padding: 15px 30px; font-size: 16px; min-width: 200px;">Load Storyboard</button>
             <button id="process-btn" class="button-primary" style="padding: 15px 30px; font-size: 16px; min-width: 200px;">Create Storyboard</button>
@@ -821,6 +832,14 @@
                         return message;
                     }
                     
+                    const projectNameEl = document.getElementById('project-name-input');
+                    const projectNameRaw = projectNameEl ? projectNameEl.value.trim() : '';
+                    if (!projectNameRaw) {
+                        const message = '請輸入「專案命名」（將成為輸出資料夾名稱的第一段）。';
+                        alert(message);
+                        return message;
+                    }
+                    
                     // Create timestamp in format: YYYYMMDD_HHMMSS
                     const now = new Date();
                     const year = now.getFullYear();
@@ -839,7 +858,8 @@
                         job_id: timestamp,
                         nodes: [],
                         transitions: [],
-                        file_name: fileName // Add filename for backend use
+                        file_name: fileName, // Add filename for backend use
+                        project_name: projectNameRaw
                     };
                     
                     // Process all nodes
@@ -2794,7 +2814,8 @@
                 fetch('/list_storyboards')
                 .then(response => response.json())
                 .then(data => {
-                    if (data.status === 'success' && data.files.length > 0) {
+                    const listItems = (data.projects && data.projects.length > 0) ? data.projects : (data.files || []);
+                    if (data.status === 'success' && listItems.length > 0) {
                         // 創建選擇對話框
                         const dialog = document.createElement('div');
                         dialog.className = 'storyboard-dialog';
@@ -2821,7 +2842,7 @@
                         
                         // 標題
                         const title = document.createElement('h2');
-                        title.textContent = 'Select Storyboard to Load';
+                        title.textContent = '選擇要載入的專案（資料夾名稱）';
                         title.style.marginBottom = '20px';
                         content.appendChild(title);
                         
@@ -2829,7 +2850,8 @@
                         const list = document.createElement('div');
                         list.style.marginBottom = '20px';
                         
-                        data.files.forEach(file => {
+                        listItems.forEach(entry => {
+                            const folder = entry.project_folder || entry.filename;
                             const item = document.createElement('div');
                             item.style.padding = '10px';
                             item.style.margin = '5px 0';
@@ -2839,12 +2861,12 @@
                             item.style.transition = 'background-color 0.3s ease';
                             
                             item.innerHTML = `
-                                <strong>${file.filename}</strong><br>
-                                <small>Modified Time: ${new Date(file.modified).toLocaleString()}</small>
+                                <strong>${folder}</strong><br>
+                                <small style="color:#64748b;">專案資料夾 · 更新時間：${new Date(entry.modified).toLocaleString()}</small>
                             `;
                             
                             item.onclick = () => {
-                                fetch(`/load_storyboard?file=${file.filename}`)
+                                fetch(`/load_storyboard?file=${encodeURIComponent(folder)}`)
                                     .then(response => {
                                         if (!response.ok) {
                                             return response.json().then(err => { throw new Error(err.message || `Failed to load storyboard: ${response.statusText}`) });
@@ -2907,13 +2929,13 @@
                                         state.updateUI();
                                         
                                         if (statusMessageEl) {
-                                            statusMessageEl.textContent = `Storyboard '${file.filename}' loaded successfully.`;
+                                            statusMessageEl.textContent = `已載入專案「${folder}」。`;
                                         } else {
                                             console.error("statusMessageEl is null. Cannot set textContent.");
                                         }
                                         
                                         if (outputTextEl) {
-                                            outputTextEl.value = `Loaded storyboard: ${file.filename}\nNodes: ${state.nodes.length}\nReady to process or edit.`;
+                                            outputTextEl.value = `Loaded project folder: ${folder}\nNodes: ${state.nodes.length}\nReady to process or edit.`;
                                         } else {
                                             console.error("outputTextEl is null. Cannot set value.");
                                         }
@@ -2961,7 +2983,7 @@
                                     })
                                     .catch(error => {
                                         console.error('Error loading storyboard:', error);
-                                        alert(`Error loading storyboard '${file.filename}': ${error.message}`);
+                                        alert(`Error loading project「${folder}」: ${error.message}`);
                                         statusMessageEl.textContent = `Failed to load storyboard: ${error.message}`;
                                         if (dialog && dialog.parentNode === document.body) { // 確保對話框存在才移除
                                            document.body.removeChild(dialog);
@@ -3003,7 +3025,7 @@
                         // 添加到頁面
                         document.body.appendChild(dialog);
                     } else {
-                        alert('No available storyboard files found!');
+                        alert('目前沒有可載入的專案資料夾（storyboard_outputs 下需有含 storyboard_*.json 的資料夾）。');
                     }
                 })
                 .catch(error => {

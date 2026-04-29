@@ -5,6 +5,7 @@ import os
 import base64
 import cgi
 import urllib.parse
+import re
 from datetime import datetime
 import logging
 import webbrowser
@@ -65,6 +66,44 @@ OUTPUT_DIR = "storyboard_outputs"
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
     logger.info(f"創建基礎目錄: {OUTPUT_DIR}")
+
+
+def is_storyboard_project_dir(output_root, dir_name):
+    """若資料夾內含 storyboard_*.json 則視為專案目錄（相容舊的 Nnodes_ 與新命名）。"""
+    path = os.path.join(output_root, dir_name)
+    if not os.path.isdir(path):
+        return False
+    try:
+        for f in os.listdir(path):
+            if f.startswith("storyboard_") and f.endswith(".json"):
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def sanitize_project_label(raw):
+    """使用者輸入的專案名片段：去除路徑與非法字元，供資料夾名使用。"""
+    if raw is None:
+        return ""
+    s = str(raw).strip()
+    if not s:
+        return ""
+    s = re.sub(r"[\s/\\:*?\"<>|.\[\]]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return (s[:60] if s else "")
+
+
+def resolve_project_timestamp(project_folder, storyboard_data):
+    """圖檔 node_i_{timestamp}.png 所用的 timestamp：優先 JSON job_id，其次舊版 Nnodes_<ts> 資料夾名。"""
+    if storyboard_data:
+        jid = storyboard_data.get("job_id")
+        if jid:
+            return str(jid)
+    if project_folder and "nodes_" in project_folder and "_" in project_folder:
+        return project_folder.split("_", 1)[1]
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
 
 # 輔助函數：創建專案資料夾結構
 def create_project_structure(project_folder):
@@ -420,7 +459,7 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({'status': 'success', 'message': '任務不在處理中或已完成'}).encode('utf-8'))
             return
             
-        # 列出所有故事板JSON文件（只從專案資料夾中搜尋）
+        # 列出所有故事板專案（每個輸出資料夾一筆；選項即資料夾名稱）
         elif path == '/list_storyboards':
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
@@ -428,31 +467,40 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             
             try:
-                files = []
+                entries = []
                 
-                # 只搜尋專案資料夾中的 JSON 文件（新格式：Xnodes_YYYYMMDD_HHMMSS 或舊格式：storyboard_YYYYMMDD_HHMMSS）
                 for item in os.listdir(OUTPUT_DIR):
-                    if ('nodes_' in item or item.startswith('storyboard_')) and os.path.isdir(os.path.join(OUTPUT_DIR, item)):
-                        project_path = os.path.join(OUTPUT_DIR, item)
-                        # 在每個專案資料夾中搜尋 storyboard JSON 文件（排除 final_boundaries.json 等）
-                        for filename in os.listdir(project_path):
-                            if filename.startswith('storyboard_') and filename.endswith('.json'):
-                                file_path = os.path.join(project_path, filename)
-                                file_stats = os.stat(file_path)
-                                files.append({
-                                    'filename': filename,
-                                    'path': file_path,
-                                    'project_folder': item,
-                                    'size': file_stats.st_size,
-                                    'modified': datetime.fromtimestamp(file_stats.st_mtime).isoformat()
-                                })
+                    if not is_storyboard_project_dir(OUTPUT_DIR, item):
+                        continue
+                    project_path = os.path.join(OUTPUT_DIR, item)
+                    latest_mtime = None
+                    try:
+                        for fname in os.listdir(project_path):
+                            if fname.startswith('storyboard_') and fname.endswith('.json'):
+                                fp = os.path.join(project_path, fname)
+                                try:
+                                    mt = os.path.getmtime(fp)
+                                except OSError:
+                                    continue
+                                if latest_mtime is None or mt > latest_mtime:
+                                    latest_mtime = mt
+                    except OSError:
+                        continue
+                    if latest_mtime is None:
+                        continue
+                    entries.append({
+                        'project_folder': item,
+                        # 與舊前端相容：filename 改為資料夾名，供 load_storyboard?file= 使用
+                        'filename': item,
+                        'modified': datetime.fromtimestamp(latest_mtime).isoformat(),
+                    })
                 
-                # 按修改時間排序（最新的在前）
-                files.sort(key=lambda x: x['modified'], reverse=True)
+                entries.sort(key=lambda x: x['modified'], reverse=True)
                 
                 response = json.dumps({
                     'status': 'success',
-                    'files': files
+                    'files': entries,
+                    'projects': entries,
                 })
                 
             except Exception as e:
@@ -478,7 +526,9 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps(response_data).encode('utf-8'))
                 return
 
-            # 安全性檢查，防止路徑遍歷
+            filename = urllib.parse.unquote(filename, encoding="utf-8")
+
+            # 安全性檢查，防止路徑遍歷（允許單一檔名或單一層專案資料夾名）
             if '..' in filename or filename.startswith('/') or filename.startswith('\\\\'):
                 self.send_response(400)
                 self.send_header('Content-type', 'application/json')
@@ -487,19 +537,45 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 response_data = {"status": "error", "message": "Invalid filename"}
                 self.wfile.write(json.dumps(response_data).encode('utf-8'))
                 return
+            if '/' in filename.replace("\\", "/"):
+                self.send_response(400)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                response_data = {"status": "error", "message": "Invalid file parameter: must be a single JSON filename or project folder name"}
+                self.wfile.write(json.dumps(response_data).encode('utf-8'))
+                return
 
-            # 只在專案資料夾中搜尋文件
+            # 只在專案資料夾中搜尋：file 可為 storyboard_*.json，或 storyboard_outputs 下的專案資料夾名（新命名含多底線時前端常傳資料夾名）
             file_path = None
             project_folder = None
-            
-            # 在專案資料夾中搜尋文件（新格式：Xnodes_YYYYMMDD_HHMMSS 或舊格式：storyboard_YYYYMMDD_HHMMSS）
+
             for item in os.listdir(OUTPUT_DIR):
-                if ('nodes_' in item or item.startswith('storyboard_')) and os.path.isdir(os.path.join(OUTPUT_DIR, item)):
+                if is_storyboard_project_dir(OUTPUT_DIR, item):
                     candidate_path = os.path.join(OUTPUT_DIR, item, filename)
-                    if os.path.exists(candidate_path):
+                    if os.path.isfile(candidate_path):
                         file_path = candidate_path
                         project_folder = item
                         break
+
+            if not file_path:
+                proj_dir = os.path.join(OUTPUT_DIR, filename)
+                if os.path.isdir(proj_dir) and is_storyboard_project_dir(OUTPUT_DIR, filename):
+                    try:
+                        json_files = [
+                            f
+                            for f in os.listdir(proj_dir)
+                            if f.startswith("storyboard_") and f.endswith(".json")
+                        ]
+                    except OSError:
+                        json_files = []
+                    if json_files:
+                        json_files.sort(
+                            key=lambda f: os.path.getmtime(os.path.join(proj_dir, f)),
+                            reverse=True,
+                        )
+                        file_path = os.path.join(proj_dir, json_files[0])
+                        project_folder = filename
 
             if not file_path:
                 self.send_response(404)
@@ -552,8 +628,8 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                         # 如果沒有 imagePath，嘗試根據節點索引尋找圖片
                         node_index = node.get('index', 0)
                         # 嘗試多種可能的檔案名稱模式
-                        # 從專案資料夾名稱提取時間戳
-                        project_timestamp = project_folder.split('_', 1)[1] if '_' in project_folder else datetime.now().strftime("%Y%m%d_%H%M%S")
+                        # 依 JSON job_id 或舊版資料夾名推斷時間戳（勿假設資料夾為 Nnodes_ts）
+                        project_timestamp = resolve_project_timestamp(project_folder, data)
                         possible_names = [
                             f"node_{node_index}_{project_timestamp}.png",
                             f"node_{node_index}.png",
@@ -645,22 +721,26 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
         
         # 視頻文件提供（支援專案資料夾結構；路徑可為 /video/檔名 或 /video/專案資料夾/檔名）
         elif path.startswith('/video/'):
-            rest = path.replace('/video/', '').lstrip('/')
-            parts = rest.split('/')
+            raw = path[len('/video/'):].lstrip("/")
+            rest = urllib.parse.unquote(raw, encoding="utf-8")
+            parts = [p for p in rest.split("/") if p]
             video_path = None
-            if len(parts) == 2:
-                project_folder_name, video_name = parts
-                candidate = os.path.join(OUTPUT_DIR, project_folder_name, video_name)
-                if os.path.exists(candidate):
-                    video_path = candidate
+            video_name = ""
+            if len(parts) >= 2:
+                project_folder_name = "/".join(parts[:-1])
+                video_name = parts[-1]
+                if project_folder_name and ".." not in project_folder_name:
+                    candidate = os.path.join(OUTPUT_DIR, project_folder_name, video_name)
+                    if os.path.isfile(candidate):
+                        video_path = candidate
             if video_path is None:
-                video_name = rest if len(parts) <= 1 else parts[-1]
+                video_name = parts[-1] if parts else (rest or "")
                 for item in os.listdir(OUTPUT_DIR):
-                    if 'nodes_' in item or item.startswith('storyboard_'):
+                    if is_storyboard_project_dir(OUTPUT_DIR, item):
                         project_path = os.path.join(OUTPUT_DIR, item)
                         if os.path.isdir(project_path):
                             candidate_path = os.path.join(project_path, video_name)
-                            if os.path.exists(candidate_path):
+                            if os.path.isfile(candidate_path):
                                 video_path = candidate_path
                                 break
             
@@ -734,18 +814,37 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                     self.wfile.write(response.encode('utf-8'))
                     return
                 
+                raw_label = data.get("project_name") or data.get("project_label") or ""
+                user_label = sanitize_project_label(raw_label)
+                if not user_label:
+                    self.send_response(400)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    response = json.dumps({
+                        'status': 'error',
+                        'message': "請在 UI 輸入專案命名（不可為空）。"
+                    })
+                    self.wfile.write(response.encode('utf-8'))
+                    return
+                
                 # 創建專案資料夾並保存故事板檔案
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 node_count = len(data['nodes'])
+                times = [float(n.get("time", 0) or 0) for n in data["nodes"]]
+                total_duration_int = int(round(max(times))) if times else 0
                 
-                # 創建專案資料夾：Xnodes_YYYYMMDD_HHMMSS
-                project_folder_name = f"{node_count}nodes_{timestamp}"
+                # 資料夾：使用者輸入_節點數_總時長（秒）；若已存在則加時間戳避免覆蓋
+                base_folder = f"{user_label}_{node_count}_{total_duration_int}"
+                project_folder_name = base_folder
+                if os.path.exists(os.path.join(OUTPUT_DIR, project_folder_name)):
+                    project_folder_name = f"{base_folder}_{timestamp}"
                 project_folder_path = os.path.join(OUTPUT_DIR, project_folder_name)
                 
                 # 創建專案資料夾結構
                 project_image_folder = create_project_structure(project_folder_path)
                 
-                # 生成檔案名稱
+                # 生成檔案名稱（沿用 storyboard_<job_id>.json，與節點圖檔時間戳一致）
                 filename = f"storyboard_{timestamp}.json"
                 file_path = os.path.join(project_folder_path, filename)
                 
@@ -837,16 +936,23 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                     # 如果已經有專案資料夾，直接使用
                     project_folder_path = os.path.join(OUTPUT_DIR, project_folder)
                     project_image_folder = os.path.join(project_folder_path, "images")
-                    # 從專案資料夾名稱提取時間戳
-                    if '_' in project_folder:
-                        project_timestamp = project_folder.split('_', 1)[1]
-                    else:
-                        project_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    project_timestamp = resolve_project_timestamp(project_folder, storyboard_data)
                 else:
                     # 如果沒有專案資料夾，創建新的
-                    project_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    project_timestamp = storyboard_data.get("job_id") or datetime.now().strftime("%Y%m%d_%H%M%S")
                     node_count = len(storyboard_data.get('nodes', []))
-                    project_folder = f"{node_count}nodes_{project_timestamp}"
+                    times = [float(n.get("time", 0) or 0) for n in storyboard_data.get("nodes", [])]
+                    total_duration_int = int(round(max(times))) if times else 0
+                    raw_label = sanitize_project_label(
+                        storyboard_data.get("project_name") or storyboard_data.get("project_label") or ""
+                    )
+                    if raw_label:
+                        base_folder = f"{raw_label}_{node_count}_{total_duration_int}"
+                        project_folder = base_folder
+                        if os.path.exists(os.path.join(OUTPUT_DIR, project_folder)):
+                            project_folder = f"{base_folder}_{project_timestamp}"
+                    else:
+                        project_folder = f"{node_count}nodes_{project_timestamp}"
                     project_folder_path = os.path.join(OUTPUT_DIR, project_folder)
                     project_image_folder = create_project_structure(project_folder_path)
                 
