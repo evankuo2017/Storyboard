@@ -847,7 +847,12 @@ class StoryboardHandler(http.server.SimpleHTTPRequestHandler):
                 # 生成檔案名稱（沿用 storyboard_<job_id>.json，與節點圖檔時間戳一致）
                 filename = f"storyboard_{timestamp}.json"
                 file_path = os.path.join(project_folder_path, filename)
-                
+
+                # 同步 job_id 為本次 timestamp，避免載入舊 storyboard 後另存為新專案時，
+                # /process_storyboard 透過 resolve_project_timestamp 拿到舊 job_id，
+                # 用「不同的 timestamp」寫出第二份 JSON（殭屍檔）。
+                data['job_id'] = timestamp
+
                 # 保存故事板檔案到專案資料夾
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
