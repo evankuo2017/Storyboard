@@ -463,7 +463,7 @@
 <body>
     <div class="container">
         <h1>FramePack Storyboard</h1>
-        <p>Create up to 10 nodes on a 120-second timeline. Add images to each node and describe transitions between nodes.</p>
+        <p>Create up to 10 nodes on a 120-second timeline. Add images to each node and describe transitions between nodes. Adjacent nodes must be at least 1.1 seconds apart (FramePack's per-section minimum).</p>
         
         <div class="timeline-container">
             <div class="timeline-content" id="timeline">
@@ -619,10 +619,10 @@
                     // Ensure time is within valid range
                     time = Math.max(0, Math.min(time, TIMELINE_LENGTH));
                     
-                    // Check for existing nodes at this time
+                    // Block if any existing node is within 1.1s (FramePack section = 33 frames / 30 fps ≈ 1.1s)
                     for (const node of this.nodes) {
-                        if (Math.abs(node.time - time) < 0.2) { // Within 0.2 seconds
-                            return { success: false, message: `There is already a node at time ${time}s` };
+                        if (Math.abs(node.time - time) < 1.1) {
+                            return { success: false, message: `Adjacent nodes must be at least 1.1s apart (conflicts with node ${node.index} at ${node.time}s)` };
                         }
                     }
                     
@@ -658,49 +658,49 @@
                     return { success: true, message: `Node added successfully at ${time}s` };
                 },
                 
-                // Updates a node's position on the timeline
+                // Updates a node's position on the timeline.
+                // Block (return success: false) if it would put the node within 1.1s of any other node,
+                // or outside the timeline. We do NOT silently clamp — the caller is expected to surface
+                // the failure message and, in the drag case, call updateUI() so the marker visually
+                // snaps back to its current state.nodes[i].time position.
                 updateNodeTime(nodeIndex, newTime) {
                     console.log(`State: Updating time for node ${nodeIndex} to ${newTime}`);
                     if (nodeIndex < 0 || nodeIndex >= this.nodes.length) {
                         return { success: false, message: "Invalid node index" };
                     }
-                    
+
                     // First node must remain at time 0
                     if (nodeIndex === 0) {
                         return { success: false, message: "Cannot move the first node (fixed at time 0)" };
                     }
-                    
-                    // Calculate valid time range to prevent overlapping nodes
-                    let minTime = 0;
-                    let maxTime = TIMELINE_LENGTH;
-                    
-                    // Find boundaries based on adjacent nodes
+
+                    // Timeline bounds
+                    if (newTime < 0 || newTime > TIMELINE_LENGTH) {
+                        return { success: false, message: `Time must be between 0 and ${TIMELINE_LENGTH}s` };
+                    }
+
+                    // Block if newTime is within 1.1s of any other node (FramePack section = 33 frames / 30 fps ≈ 1.1s)
                     for (const node of this.nodes) {
-                        if (node.index < nodeIndex && node.time > minTime) {
-                            minTime = node.time + 0.2; // Add 0.2 second margin
-                        }
-                        if (node.index > nodeIndex && node.time < maxTime) {
-                            maxTime = node.time - 0.2; // Add 0.2 second margin
+                        if (node.index === nodeIndex) continue;
+                        if (Math.abs(node.time - newTime) < 1.1) {
+                            return { success: false, message: `Adjacent nodes must be at least 1.1s apart (conflicts with node ${node.index} at ${node.time}s)` };
                         }
                     }
-                    
-                    // Ensure time is within valid range
-                    newTime = Math.max(minTime, Math.min(newTime, maxTime));
-                    
-                    // Update the node time
+
+                    // Commit
                     this.nodes[nodeIndex].time = newTime;
-                    
+
                     // Re-sort nodes by time
                     this.nodes.sort((a, b) => a.time - b.time);
-                    
+
                     // Update indices after sorting
                     this.nodes.forEach((node, i) => {
                         node.index = i;
                     });
-                    
+
                     // Keep the moved node selected
                     this.currentNodeIndex = nodeIndex;
-                    
+
                     return { success: true, message: `Node ${nodeIndex} moved to ${newTime}s` };
                 },
                 
@@ -1622,27 +1622,28 @@
                     
                     // 每秒的間距 (單位: 像素)
                     const pixelsPerSecond = (timelineEl.clientWidth - 200) / TIMELINE_LENGTH;
-                    
+
                     function onMouseMove(e) {
                         if (!isDragging) return;
-                        
+
                         // 如果滑鼠沒有明顯移動，避免不必要的更新
                         if (Math.abs(e.clientX - lastX) < 1) return;
                         lastX = e.clientX;
-                        
+
                         // 使用 requestAnimationFrame 優化性能
                         if (animationFrame) {
                             cancelAnimationFrame(animationFrame);
                         }
-                        
+
                         animationFrame = requestAnimationFrame(() => {
                             // 計算水平位移
                             const dx = e.clientX - startX;
-                            
+
                             // 計算新位置 (單位: 像素)
                             const newLeft = startLeft + dx;
-                            
-                            // 限制在有效範圍內
+
+                            // 拖動預覽只 clamp 在時間軸物理邊界內，不去管 1.1s 最小間隔——
+                            // 由 onMouseUp 呼叫 state.updateNodeTime 統一驗證，違規時靠 updateUI() 還原。
                             const maxLeft = (timelineEl.clientWidth - 200);
                             const constrainedLeft = Math.max(0, Math.min(maxLeft, newLeft));
                             
@@ -1690,13 +1691,14 @@
                         
                         // 獲取最終時間位置
                         const finalTime = parseFloat(element.getAttribute('data-time'));
-                        
-                        // 更新狀態中的節點時間
-                        state.updateNodeTime(nodeIndex, finalTime);
-                        
-                        // 更新 UI
+
+                        // 嘗試更新狀態。違反 1.1s 最小間隔時 result.success === false，
+                        // state 不會被改動，緊接著的 updateUI() 會清掉所有 marker 並從
+                        // state.nodes 重建 → 被拖過的節點視覺上自動彈回原位。
+                        const result = state.updateNodeTime(nodeIndex, finalTime);
+                        statusMessageEl.textContent = result.message;
                         state.updateUI();
-                        
+
                         // 移除時間提示
                         timeTooltip.remove();
                         
